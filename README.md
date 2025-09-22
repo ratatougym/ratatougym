@@ -60,17 +60,6 @@ The `Arena` class and its children classes. Define the shape of the arena. \[[Do
 ### Sensory
 The `Sensory` class and its children classes. Define the sensories of the agent. It includes the spatial modulated sensories and movement modulated sensories \[[Documentation](https://ratatougym.github.io/rtgym.sensory.html)\]
 
-#### Spatial modulated sensories
-##### Spatially modulated non-grid/place cell sensories
-<p align="center">
-<picture><img src="assets/sm_firing_fields.png" width="70%"/></picture>
-</p>
-
-##### Spatially modulated binary sensories
-<p align="center">
-<picture><img src="assets/sm_binary_firing_fields.png" width="70%"/></picture>
-</p>
-
 ### Behavior
 Sometimes we need the agent to follow a behavior. The `Behavior` class and its children classes define the behaviors of the agent. <br>
 Further improvement may required to describe mice movement patterns in the arena. \[[Documentation](https://ratatougym.github.io/rtgym.agent.behavior.html)\]
@@ -88,18 +77,6 @@ Further improvement may required to describe mice movement patterns in the arena
 #### Random walk - random stopping
 <p align="center">
 <picture><img src="assets/behavior_random_stopping.gif" width="35%"/></picture>
-</p>
-
-#### Preference
-Sometimes the agent (usually we consider it as a mouse) has a preference to stay in a certain area. The `Preference` class and its children classes define the preference of the agent. <br>
-
-<p align="center">
-    <picture>
-        <img src="assets/spatial_preference.png" width="60%" style="display:inline; vertical-align:middle;"/>
-    </picture>
-    <picture>
-        <img src="assets/direction_drift.png" width="30%" style="display:inline; vertical-align:middle;"/>
-    </picture>
 </p>
 
 ## Citation
