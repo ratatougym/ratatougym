@@ -1,0 +1,6 @@
+- Added `str_filter` and `type_filter` to `get_responses` and `observe` in `trial.py`.
+- Added `filter_sensories` to `sensory.py`.
+- Added `Masking` class to `utils/masking.py`.
+- Added `sens_type` to all sensory classes.
+- Added `seed` to all sensory classes.
+- Optimized memory usage in `data_processing.py` by adding all trial data to a single tensor and while simultaneously handle the nan entries.
