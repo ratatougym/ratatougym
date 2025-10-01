@@ -22,10 +22,10 @@ class DirectionRad(DisplacementAbs):
             ssigma_s (float): Spatial smoothing sigma in seconds. Defaults to 0.0.
             
     Attributes:
-        sens_type (str): Sensory type identifier 'direction_rad'.
+        neuron_type (str): Sensory type identifier 'direction_rad'.
     """
     
-    sens_type = 'direction_rad'
+    neuron_type = 'direction_rad'
     
     def __init__(self, arena, **kwargs):
         super().__init__(arena, **kwargs)

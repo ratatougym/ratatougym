@@ -22,10 +22,10 @@ class SpeedCell(DisplacementAbs):
             normalize (bool): Whether to normalize cell responses.
             
     Attributes:
-        sens_type (str): Sensory type identifier 'speed_cell'.
+        neuron_type (str): Sensory type identifier 'speed_cell'.
     """
     
-    sens_type = 'speed_cell'
+    neuron_type = 'speed_cell'
 
     def __init__(self, arena, **kwargs):
         super().__init__(arena, **kwargs)

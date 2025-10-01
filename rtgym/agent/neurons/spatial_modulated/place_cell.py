@@ -34,23 +34,23 @@ class PlaceCell(SMBase):
             normalize (bool): Whether to normalize responses to [0,1]. Defaults to False.
             
     Attributes:
-        sens_type (str): Sensory type identifier 'place_cell'.
+        neuron_type (str): Sensory type identifier 'place_cell'.
         response_map (np.ndarray): Spatial response map of shape (n_cells, *arena_dimensions).
             Contains the firing rate map for each cell across the entire arena.
     """
     
-    sens_type = 'place_cell'
+    neuron_type = 'place_cell'
     
     def __init__(self, arena, **kwargs):
         super().__init__(arena, **kwargs)
-        
+
         # parameters
         self.sigma = kwargs.get('sigma', 8)  # Place field width
         self.ssigma = kwargs.get('ssigma', 0)  # Random variation in field width
         self.dg_ratio = kwargs.get('dg_ratio', 1)  # For difference-of-Gaussian fields
         self.magnitude = kwargs.get('magnitude', None)  # Response scaling
         self.normalize = kwargs.get('normalize', False)  # Normalize to [0,1]
-        
+
         # check parameters and initialize responses
         self._check_params()
         self._init_params()

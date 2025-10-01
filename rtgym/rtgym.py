@@ -1,6 +1,6 @@
 """
-RatatouGym is a python package that provides a simple interface to generate sensory responses
-from a virtual agent in a virtual environment.
+RatatouGym is a python package that provides a simple interface to generate 
+neuronal responses from a agent in a simulated environment.
 
 This file contains more documentation as it serves as the main API for the package.
 """
@@ -17,14 +17,20 @@ import matplotlib.animation as animation
 
 class RatatouGym():
     """
-    The RatatouGym class is a singleton that integrates the environment, agent, behavior, and sensory streams.
-    When initialized, the class creates an arena and an uninitialized agent.
-    The arena is the environment the agent moves in, and the agent is the subject navigating the arena.
+    The RatatouGym class is a singleton that integrates the environment, agent, 
+    behavior, and neuronal streams.When initialized, the class creates an arena 
+    and an uninitialized agent. The arena is the environment the agent moves in, 
+    and the agent is the subject navigating the arena.
 
-    After initialization, both the arena and the agent must be set up.
-    For the arena, you can either choose from predefined shapes or provide a custom 2D NumPy array as the map.
-    For the agent, you must configure sensory and behavioral parameters. Sensory is defined by a dictionary of the sensory cell types you want to simulate. Behavior is defined by parameters such as movement speed, how frequently the agent changes direction, and how it avoids obstacles.
-    
+    After initialization, both the arena and the agent must be set up. For the 
+    arena, you can either choose from predefined shapes or provide a custom 2D 
+    NumPy array as the map. For the agent, you must configure neuronal and 
+    behavioral parameters. Neurons is defined by a dictionary of the neuronal 
+    groups you want to simulate. Behavior is defined by parameters such as 
+    movement speed, how frequently the agent changes direction, and how it 
+    avoids obstacles. The specific parameters can be found in their respective 
+    documentation.
+
     Args:
         temporal_resolution (float): Time resolution in milliseconds. E.g. 50 will mean 50ms per timestep.
         spatial_resolution (float): Spatial resolution in units per pixel. E.g. 1 will mean 1cm per pixel.
@@ -329,12 +335,12 @@ class RatatouGym():
     # ======================================================================================
     # Sensory methods
     # ======================================================================================
-    def set_sensory_manually(self, sens_type, sensory):
+    def set_sensory_manually(self, neuron_type, sensory):
         import warnings
         warnings.warn("DeprecationWarning: The method 'set_sensory_manually' is deprecated. "
                       "Potential implementation issues might cause unintended behavior. "
                       "It is recommended to implement a separate sensory class instead.")
-        # self.agent.set_sensory_manually(sens_type, sensory)
+        # self.agent.set_sensory_manually(neuron_type, sensory)
     # ======================================================================================
 
     # ======================================================================================

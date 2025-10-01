@@ -1,98 +1,74 @@
 import numpy as np
 from rtgym.agent.behavior import Behavior
-from rtgym.agent.sensory import Sensory
+from rtgym.agent.neurons import Neurons
 from rtgym.dataclass import AgentState, Trajectory, RawAgentState, RawTrajectory
 from typing import Union
 
 
 class Agent():
     """
-    The class object of the Agent. An agent represents the subject that navigates 
-    or traverses the arena, either randomly or under control. This implementation 
-    manages two central aspects: how the agent generates trajectories through the 
-    environment, and how different sensory systems or spatial navigation cell types 
-    might respond along those trajectories.
+    The Agent represents a virtual subject that navigates within an arena and 
+    generates neuronal responses based on its movement. It serves as the 
+    encapsulating object for two main components:
 
-    The Agent can be thought of as a virtual animal whose movement and sensory 
-    inputs can be precisely controlled and observed. In this setting, theoretical 
-    models of spatially tuned cells—such as place cells, grid cells, or head 
-    direction cells—can be applied to predict how each of them would respond given 
-    the positions visited along a trajectory.
+    - **Behavior system**: Governs how the agent moves, either autonomously 
+        (random or rule-based trajectories) or under manual control.
+    - **Neurons**: Simulates neuronal groups (e.g., place cells, grid cells, head 
+        direction cells) that respond to the agent's movement and position.
 
-    The Agent acts as a unifying interface that combines behavioral rules with 
-    sensory transformations, enabling reproducible experiments where navigation 
-    and perception are directly linked.
+    The Agent is coupled to a gym environment that defines the arena, as well as 
+    the spatial and temporal resolution of the simulation. It can be spawned at 
+    chosen or random positions, moved step by step, or allowed to traverse 
+    autonomously. During these interactions, its neuronal responses can be 
+    queried for individual states or full trajectories.
 
-    The Agent is coupled to a gym environment that defines the arena, spatial and 
-    temporal resolution, and the overall rules of the task. Through this interface, 
-    the Agent can be spawned at specific or random locations, controlled step by 
-    step, or allowed to move autonomously, while its sensory responses can be 
-    queried from individual states or full trajectories.
-    
+    Conceptually, the Agent can be regarded as a virtual animal whose navigation 
+    and neuronal responses are directly linked, providing a reproducible interface 
+    for testing theoretical models of spatially tuned cells.
+
     Args:
-        gym (RatatouGym): The parent gym environment.
-        behavior_profile (dict): Current behavior configuration.
-        sensory_profile (dict): Current sensory configuration.
-        sensory (Sensory): Sensory system manager.
-        behavior (Behavior): Behavior system manager.
+        gym (RatatouGym): Parent gym environment providing the arena, resolution, 
+            and task rules.
     """
     
     def __init__(self, gym):
+        """Initialize an Agent instance.
+        
+        Args:
+            gym (RatatouGym): The parent gym environment that provides the arena,
+                temporal/spatial resolution, and task rules.
+        """
         self.gym = gym
         self.behavior_profile = None
-        self.sensory_profile = None
-        self.sensory = Sensory(self.gym)
+        self.neuron_profiles = None
+        self.neurons = Neurons(self.gym)
         self.behavior = Behavior(self.gym)
         self._state = RawAgentState()
 
     @property
-    def temporal_resolution(self):
-        """Get temporal resolution from gym.
+    def neuron_groups(self):
+        """
+        Get all neuron groups of the agent.
         
         Returns:
-            float: Temporal resolution in milliseconds.
+            dict: Dictionary of neuron groups keyed by name.
         """
-        return self.gym.temporal_resolution
-
-    @property
-    def spatial_resolution(self):
-        """Get spatial resolution from gym.
-        
-        Returns:
-            float: Spatial resolution in units per pixel.
-        """
-        return self.gym.spatial_resolution
-
-    @property
-    def sensories(self):
-        """Get all sensory modalities.
-        
-        Returns:
-            dict: Dictionary of sensory modalities keyed by name.
-        """
-        return self.sensory.sensories
+        return self.neurons.neuron_groups
 
     @property
     def arena(self):
-        """Get arena from gym.
+        """
+        Point to the arena environment.
         
         Returns:
             Arena: The arena environment.
         """
         return self.gym.arena
-    
-    @property
-    def controllable(self):
-        """Get controllable behavior system.
-        
-        Returns:
-            ControllableBehavior: Controllable behavior manager.
-        """
-        return self.behavior.controllable
 
     @property
     def autonomous(self):
-        """Get autonomous behavior system.
+        """
+        Get autonomous behavior system.
         
         Returns:
             AutonomousBehavior: Autonomous behavior manager.
@@ -104,24 +80,27 @@ class Agent():
         """Get current agent state.
         
         Returns:
-            RawAgentState: Current raw agent state.
+            RawAgentState: The internal state used to keep the agent's movement 
+                during trajectory generation.
         """
         return self._state
 
     def _on_arena_change(self):
-        """Handle arena change events.
+        """
+        Handle arena change events.
         
-        Updates behavior and sensory systems when the arena changes.
+        Updates behavior and neurons when the arena changes.
         """
         if self.arena is not None:
             self.behavior._on_arena_change()
-            self.sensory._on_arena_change()
+            self.neurons._on_arena_change()
             self._init_behavior_from_profile()
-            self._init_sensory_from_profile()
+            self._init_neurons_from_profile()
 
-    def set_behavior(self, behavior_profile):
-        """Set behavior configuration.
-        
+    def init_behavior(self, behavior_profile: dict):
+        """
+        Initialize the agent's behavior.
+
         Args:
             behavior_profile (dict): Behavior configuration parameters.
         """
@@ -129,7 +108,8 @@ class Agent():
         self._init_behavior_from_profile()
 
     def _init_behavior_from_profile(self):
-        """Initialize behavior from behavior profile.
+        """
+        Initialize behavior from behavior profile.
         
         Sets up the behavior system using the current behavior profile
         if both profile and arena are available.
@@ -137,54 +117,56 @@ class Agent():
         if self.behavior_profile is not None and self.arena is not None:
             self.behavior.init_from_profile(self.behavior_profile)
 
-    def set_sensory(self, sensory_profile):
-        """Set sensory configuration.
-        
+    def init_neurons(self, neuron_profiles: dict):
+        """
+        Initialize the agent's neurons.
+
         Args:
-            sensory_profile (dict): Sensory configuration parameters.
+            neuron_profile (dict): Neurons configuration parameters.
         """
-        self.sensory_profile = sensory_profile
-        self._init_sensory_from_profile()
+        self.neuron_profiles = neuron_profiles
+        self._init_neurons_from_profile()
 
-    def add_sensory(self, sensory_profile):
-        """Add sensory modalities to existing configuration.
-        
+    def add_neuron_group(self, neuron_profile: dict):
+        """
+        Add neuron group to existing configuration.
+
         Args:
-            sensory_profile (dict): Additional sensory configuration parameters.
+            neuron_profile (dict): Additional neuron group configuration parameters.
         """
-        self.sensory_profile.update(sensory_profile)
-        self.sensory.add_sensory(sensory_profile)
+        assert neuron_profile is not None, "neuron_profile is None"
+        self.neuron_profiles.update(neuron_profile)
+        self.neurons.add_neuron_group(neuron_profile)
 
-    def set_sensory_manually(self, sens_type, sens):
-        import warnings
-        warnings.warn("DeprecationWarning: The method 'set_sensory_manually' is deprecated. "
-                      "Potential implementation issues might cause unintended behavior. "
-                      "It is recommended to implement a separate sensory class instead.")
-        # if self.sensory is not None:
-        #     print('Warning: sensory is reset')
-        # self.sensory.set_sensory_manually(sens_type, sens)
-        # self.sensory = sensory
-
-    @property
-    def sensories(self):
-        """Get all sensory modalities.
-        
-        Returns:
-            dict: Dictionary of sensory modalities keyed by name.
+    def _init_neurons_from_profile(self):
         """
-        return self.sensory.sensories
-
-    def _init_sensory_from_profile(self):
+        Initialize the neurons class from the profile. 
+        It must be called after the arena is set.
         """
-        Initialize sensory from sensory profile
-        """
-        if self.sensory_profile is not None and self.arena is not None:
-            self.sensory.init_from_profile(self.sensory_profile)
+        if self.neuron_profiles is not None and self.arena is not None:
+            self.neurons.init_from_profile(self.neuron_profiles)
 
     # ================================
     # Behavior
     # ================================
-    def random_traverse(self, duration: float, batch_size: int, init_pos=None, init_state=None, pause_prob=0):
+    def random_traverse(self, duration: float, batch_size: int, 
+                        init_pos=None, init_state=None, pause_prob=0, **kwargs):
+        """
+        Generate a random trajectory for the agent.
+
+        Creates a trajectory using autonomous behavior with optional pausing.
+        Updates the agent's internal state with the final state of the trajectory.
+        
+        Args:
+            duration (float): Duration of the trajectory in seconds.
+            batch_size (int): Number of parallel trajectories to generate.
+            init_pos (np.ndarray, optional): Initial position of the agent.
+            init_state (AgentState, optional): Initial state of the agent.
+            pause_prob (float, optional): Probability of pausing the agent (default: 0).
+                
+        Returns:
+            Trajectory: Generated trajectory data.
+        """
         traj, state = self.behavior.generate_trajectory(duration, batch_size, init_pos, init_state)
         if pause_prob > 0:
             pause_mask = np.random.rand(batch_size) < pause_prob
@@ -196,26 +178,80 @@ class Agent():
         return traj
 
     def step(self, displacement):
-        self._state = self.controllable.step(self._state, displacement)
+        """
+        Take a single controllable step. This is for controllable behavior.
+        
+        Updates the agent's state by applying the given displacement through
+        the controllable behavior system.
+        
+        Args:
+            displacement (np.ndarray): Displacement vector to apply to the agent.
+        """
+        self._state = self.behavior.controllable.step(self._state, displacement)
 
     def get_response(
             self,
             agent_data: Union[AgentState, Trajectory],
-            return_format='array', 
-            keys=None, 
-            str_filter=None, 
-            type_filter=None
+            return_format: str = 'array', 
+            keys: list = None, 
+            str_filter: str = None, 
+            type_filter: str = None
         ):
+        """
+        Get neuronal responses for given agent data.
+
+        Computes neuronal responses (e.g., place cell firing, grid cell activity)
+        for the provided agent state or trajectory data.
+
+        Args:
+            agent_data (Union[AgentState, Trajectory]): Agent state or trajectory
+                data to compute neuronal responses for.
+            return_format (str, optional): Format for returned data (default: 'array').
+            keys (list, optional): Specific neuronal keys to return.
+            str_filter (str, optional): String filter for neuronal selection.
+            type_filter (type, optional): Type filter for neuronal selection. The
+                type filter check the neuron_type attribute of the corresponding 
+                neuronal group.
+
+        Returns:
+            Neuronal response data in the specified format.
+
+        Examples:
+            >>> # Get only place cell responses
+            >>> neuron_groups = {
+            >>>     'place_cells': {
+            >>>         'type': 'place_cells',
+            >>>         'n_cells': 100,
+            >>>     },
+            >>>     'grid_cells': {
+            >>>         'type': 'grid_cells',
+            >>>         'n_cells': 100,
+            >>>     },
+            >>>     'weak_spatially_modulated': {
+            >>>         'type': 'weak_sm_cell',
+            >>>         'n_cells': 100,
+            >>>     },
+            >>> }
+            >>> traj = agent.random_traverse(duration=10, batch_size=10)
+            >>> responses = agent.get_response(traj, return_format='array', keys=['place_cells'])
+            >>>
+            >>> # Get all neuronal responses for cell groups with key words 'cell'
+            >>> responses = agent.get_response(traj, return_format='array', str_filter='cell')
+            >>>
+            >>> # Get all neuronal responses for cell groups of type 'weak_sm_cell'
+            >>> responses = agent.get_response(traj, return_format='array', type_filter='weak_sm_cell')
+        """
         if isinstance(agent_data, RawAgentState):
             agent_data = agent_data.to_agent_state()
         elif isinstance(agent_data, RawTrajectory):
             agent_data = agent_data.to_trajectory()
-        return self.sensory.get_response(agent_data, return_format, keys, str_filter, type_filter)
+        return self.neurons.get_response(agent_data, return_format, keys, str_filter, type_filter)
 
     def spawn(self, init_pos=None, init_state=None):
-        """Spawn the controllable agent at the given position and state.
-        
-        Resets the controllable behavior and initializes the agent at a specific
+        """
+        Spawn the agent at the given position and state.
+
+        Resets the behavior and initializes the agent at a specific
         location and state for manual control.
         
         Args:
@@ -223,7 +259,7 @@ class Agent():
             init_state (AgentState or RawAgentState, optional): Initial state of the agent. 
                 If both init_pos and init_state are provided, init_state will be used.
         """
-        self.controllable.reset()
+        self.behavior.controllable.reset()
         if init_state is not None:
             if isinstance(init_state, RawAgentState):
                 self._state = init_state.copy()
@@ -237,9 +273,12 @@ class Agent():
 
     def random_spawn(self, batch_size: int):
         """
-        Spawn the controller at a random position in the arena.
+        Spawn the agent at a random position in the arena.
+        
+        Resets the controllable behavior and places the agent at a randomly
+        selected valid position within the arena.
+        
+        Args:
+            batch_size (int): Number of random positions to generate.
         """
         self.spawn(init_pos=self.arena.random_position(batch_size))
-
-    def step(self, displacement):
-        self._state = self.controllable.step(self._state, displacement)

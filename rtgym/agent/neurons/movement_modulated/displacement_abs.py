@@ -20,10 +20,10 @@ class DisplacementAbs(MMBase):
             ssigma_s (float): Spatial smoothing sigma in seconds.
             
     Attributes:
-        sens_type (str): Sensory type identifier 'displacement_abs'.
+        neuron_type (str): Sensory type identifier 'displacement_abs'.
     """
     
-    sens_type = 'displacement_abs'
+    neuron_type = 'displacement_abs'
     
     def __init__(self, arena, **kwargs):
         super().__init__(arena, **kwargs)

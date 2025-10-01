@@ -11,7 +11,7 @@ The documentation is available at [here](https://ratatougym.github.io/).
 ### Create a virtual environment
 We recommend using conda to create a new environment.
 ```bash
-conda create -n rtgym python=3.10
+conda create -n rtgym python=3.11
 conda activate rtgym
 ```
 

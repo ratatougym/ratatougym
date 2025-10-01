@@ -37,7 +37,7 @@ class MMBase():
         AssertionError: If instantiated directly (abstract class) or n_cells <= 0.
     """
     
-    sens_type = 'mm_base'
+    neuron_type = 'mm_base'
     
     def __init__(self, arena, n_cells, t_res, sensory_key, seed=None, **kwargs):
         self.arena = arena

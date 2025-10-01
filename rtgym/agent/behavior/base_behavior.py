@@ -1,10 +1,14 @@
 import numpy as np
 from scipy.ndimage import distance_transform_edt
+from functools import wraps
 from .behavior_config import BehaviorConfig
 
 
 class BaseBehavior:
-    """Base class for agent behavior systems.
+    """
+    Base class for agent behavior systems.
+
+    Note: Not supposed to be used directly.
     
     Provides common functionality for behavior generation including boundary
     avoidance, coordinate updates, and movement computations. This is an
@@ -37,6 +41,7 @@ class BaseBehavior:
         Raises:
             ValueError: If behavior is not initialized.
         """
+        @wraps(func)
         def wrapper(instance, *args, **kwargs):
             if not instance.initialized:
                 raise ValueError("Behavior not initialized.")

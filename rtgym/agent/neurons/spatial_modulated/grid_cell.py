@@ -9,7 +9,7 @@ class GridCell(SMBase):
     """
     Grid cell responses for a spatially modulated grid-like field.
     """
-    sens_type = 'grid_cell'
+    neuron_type = 'grid_cell'
     def __init__(self, arena, **kwargs):
         """Initialize the grid cell responses.
         
@@ -202,7 +202,7 @@ class GridCell(SMBase):
             dict: Dictionary of the essential attributes.
         """
         return {
-            'sens_type': self.sens_type,
+            'neuron_type': self.neuron_type,
             'n_cells': self.n_cells,
             'sigma': self.sigma,
             'scale': self.scale,

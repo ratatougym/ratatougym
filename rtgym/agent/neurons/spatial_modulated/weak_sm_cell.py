@@ -20,11 +20,11 @@ class WeakSMCell(SMBase):
             magnitude (float): Maximum magnitude of cell responses.
             
     Attributes:
-        sens_type (str): Sensory type identifier 'weak_sm_cell'.
+        neuron_type (str): Sensory type identifier 'weak_sm_cell'.
         response_map (np.ndarray): Spatial response map of shape (n_cells, *arena_dimensions).
     """
     
-    sens_type = 'weak_sm_cell'
+    neuron_type = 'weak_sm_cell'
     
     def __init__(self, arena, **kwargs):
         super().__init__(arena, **kwargs)

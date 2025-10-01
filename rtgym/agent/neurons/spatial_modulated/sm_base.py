@@ -33,8 +33,8 @@ class SMBase():
         AssertionError: If instantiated directly (abstract class) or n_cells <= 0.
     """
     
-    sens_category = 'spatial_modulated'
-    sens_type = 'sm_base'
+    neuron_category = 'spatial_modulated'
+    neuron_type = 'sm_base'
     
     def __init__(self, arena, n_cells, sensory_key, seed=None, **kwargs):
         self.arena = arena

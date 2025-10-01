@@ -25,10 +25,10 @@ class DirectionCell(MMBase):
             msigma (float): Standard deviation of magnitude modulation.
             
     Attributes:
-        sens_type (str): Sensory type identifier 'direction_cell'.
+        neuron_type (str): Sensory type identifier 'direction_cell'.
     """
     
-    sens_type = 'direction_cell'
+    neuron_type = 'direction_cell'
     
     def __init__(self, arena, **kwargs):
         super().__init__(arena, **kwargs)

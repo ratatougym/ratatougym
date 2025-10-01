@@ -20,10 +20,10 @@ class BoundaryCell(SMBase):
             center_border_ratio (float): Ratio of center to border cells (0-1). Defaults to 0.5.
             
     Attributes:
-        sens_type (str): Sensory type identifier 'boundary_cell'.
+        neuron_type (str): Sensory type identifier 'boundary_cell'.
     """
     
-    sens_type = 'boundary_cell'
+    neuron_type = 'boundary_cell'
     
     def __init__(self, arena, **kwargs):
         super(BoundaryCell, self).__init__(arena, **kwargs)

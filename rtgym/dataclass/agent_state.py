@@ -57,8 +57,32 @@ class AgentState:
 
     @property
     def int_coord(self):
+        """
+        Get agent coordinates as integers.
+        
+        Converts the agent's spatial coordinates to integer values, which is
+        useful for indexing into discrete spatial grids or arena maps. This
+        property performs type conversion from floating-point coordinates to
+        integer coordinates through truncation.
+        
+        Returns:
+            np.ndarray: Integer coordinates with shape (n_batch, 2) where each
+                row contains [x, y] coordinates as integers.
+        """
         return self.coord.astype(int)
 
     @property
     def float_coord(self):
+        """
+        Get agent coordinates as floating-point values.
+        
+        Returns the agent's spatial coordinates in their original floating-point
+        format. This provides access to precise positional information without
+        any type conversion or precision loss, which is important for accurate
+        spatial calculations and continuous movement tracking.
+        
+        Returns:
+            np.ndarray: Floating-point coordinates with shape (n_batch, 2) where
+                each row contains [x, y] coordinates as floats.
+        """
         return self.coord

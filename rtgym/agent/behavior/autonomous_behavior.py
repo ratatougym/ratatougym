@@ -5,17 +5,52 @@ from rtgym.dataclass import RawTrajectory, RawAgentState
 
 
 class AutonomousBehavior(BaseBehavior):
+    """
+    The AutonomousBehavior class is responsible for generating random traversal
+    trajectories for the agent.
+
+    This class implements autonomous agent behavior that generates trajectories 
+    through random walks (with momentum). It generates trajectories with 
+    configurable parameters including velocity distributions, random drift, 
+    direction switching probabilities, and boundary avoidance.
+    """
     def __init__(self, gym, config):
         super().__init__(gym, config)
         self.raw_agent_state = RawAgentState()
 
     def _check_params(self):
+        """
+        Validate behavior configuration parameters.
+
+        Ensures all configuration parameters are within valid ranges and meet
+        the requirements for trajectory generation.
+
+        Raises:
+            AssertionError: If any parameter is outside valid range.
+        """
         assert self.config.velocity_mean > 0, 'velocity_mean must be positive'
         assert self.config.random_drift_magnitude >= 0, 'random_drift_magnitude must be non-negative'
         assert 0 <= self.config.switch_direction_prob <= 1, 'switch_direction_prob must be in [0, 1]'
         assert 0 <= self.config.switch_velocity_prob <= 1, 'switch_velocity_prob must be in [0, 1]'
 
     def init_from_profile(self, raw_profile):
+        """
+        Initialize behavior configuration from a profile dictionary.
+
+        Extracts and validates behavior parameters from the provided profile.
+        Sets default values for optional parameters and checks parameter validity.
+
+        Args:
+            raw_profile (dict): Configuration dictionary containing behavior parameters.
+                Required keys: 
+                    - velocity_mean
+                    - random_drift_magnitude
+                    - switch_direction_prob
+                    - switch_velocity_prob
+                Optional keys: 
+                    - velocity_sd
+                    - avoid_boundary_dist
+        """
         required_keys = ['velocity_mean', 'random_drift_magnitude', 'switch_direction_prob', 'switch_velocity_prob']
         if all(key in raw_profile for key in required_keys):
             self.config.velocity_mean = raw_profile['velocity_mean']
@@ -35,10 +70,13 @@ class AutonomousBehavior(BaseBehavior):
 
     @BaseBehavior.require_init
     def generate_trajectory(self, duration: float, batch_size: int, init_pos=None, init_state=None):
-        """Generate a trajectory and return generated data.
+        """
+        Generate a trajectory and return generated data.
         
         Creates autonomous agent trajectories based on the configured behavior
-        parameters including random walks and boundary avoidance.
+        parameters including random walks and boundary avoidance. The trajectory
+        generation process involves initializing agent states, generating movement
+        at each timestep, computing displacements, and calculating head directions.
         
         Args:
             duration (float): Duration of the trial in seconds.
@@ -48,7 +86,9 @@ class AutonomousBehavior(BaseBehavior):
                 If both init_pos and init_state are provided, init_state will be used.
                 
         Returns:
-            Trajectory: Generated trajectory as a rtgym.dataclass.Trajectory object.
+            tuple: A tuple containing:
+                - Trajectory: Generated trajectory as a rtgym.dataclass.Trajectory object.
+                - RawAgentState: Final state of the agent after trajectory generation.
         """
         self.dur_ts = self.gym.to_ts(duration)
         self.batch_size = batch_size
@@ -69,6 +109,18 @@ class AutonomousBehavior(BaseBehavior):
         return raw_traj.to_trajectory(), self.raw_agent_state
 
     def _random_velocity(self, size):
+        """Generate random velocity values from a log-normal distribution.
+        
+        Converts the configured mean and standard deviation parameters into
+        the underlying Gaussian distribution parameters for log-normal sampling.
+        Scales the results by temporal resolution.
+        
+        Args:
+            size (int or tuple): Shape of the output array.
+            
+        Returns:
+            np.ndarray: Random velocity values scaled for the simulation timestep.
+        """
         # Solve for the mean and sigma of the underlying Gaussian
         # distribution with which we used to generate log-normal
         m = self.config.velocity_mean
@@ -79,6 +131,14 @@ class AutonomousBehavior(BaseBehavior):
         return dist / 1e3 * self.t_res
 
     def _compute_displacements(self, raw_traj):
+        """Compute displacement vectors from coordinate differences.
+        
+        Calculates displacement vectors between consecutive positions and
+        pads with zeros at the end to maintain consistent array dimensions.
+        
+        Args:
+            raw_traj (RawTrajectory): Raw trajectory object to update with displacements.
+        """
         raw_traj.displacements = np.diff(raw_traj.coord, axis=1)
         raw_traj.displacements = np.concatenate([
             raw_traj.displacements, 
@@ -89,7 +149,8 @@ class AutonomousBehavior(BaseBehavior):
         """Generate head directions based on movement direction.
         
         Computes head direction as the angle of movement direction,
-        aligning the agent's heading with its movement vector.
+        aligning the agent's heading with its movement vector using
+        arctan2 to handle all quadrants correctly.
         
         Args:
             raw_traj (RawTrajectory): Raw trajectory object to update with head directions.
@@ -105,6 +166,15 @@ class AutonomousBehavior(BaseBehavior):
         raw_traj.hd[:] = angle_rad[..., np.newaxis]
 
     def _generate_trajectory(self, raw_traj):
+        """Generate the main trajectory by iterating through timesteps.
+        
+        For each timestep, updates agent coordinates, adjusts drifting direction
+        based on switching probabilities, updates velocity, computes new displacement
+        vectors, applies boundary avoidance, and stores the state in the trajectory.
+        
+        Args:
+            raw_traj (RawTrajectory): Raw trajectory object to populate with generated data.
+        """
         for ts in range(1, self.dur_ts):
             self._update_coord(self.raw_agent_state)
             self._update_drifting_direction(self.raw_agent_state)
@@ -123,10 +193,15 @@ class AutonomousBehavior(BaseBehavior):
             raw_traj.update_state(ts, self.raw_agent_state)
     
     def _update_drifting_direction(self, raw_agent_state):
-        """Update the drifting direction of the agent.
+        """Update the drifting direction of the agent based on switching probability.
+        
+        Randomly determines which agents should switch their drift direction
+        based on the configured switch_direction_prob. For agents that switch,
+        generates new random drift vectors with the configured magnitude.
 
         Args:
-            raw_agent_state: Generator state of the agent. A rtgym.dataclass.GeneratorState object.
+            raw_agent_state (RawAgentState): Generator state of the agent containing
+                current drift, velocity, and batch information.
         """
         # Randomly switch the direction of the random drift
         switch_direction_idx = self._flip_coin(self.config.switch_direction_prob, raw_agent_state.batch_size)
@@ -139,10 +214,15 @@ class AutonomousBehavior(BaseBehavior):
             )
 
     def _update_velocity(self, raw_agent_state):
-        """Update the velocity of the agent.
+        """Update the velocity of the agent based on switching probability.
+        
+        Randomly determines which agents should change their velocity based on
+        the configured switch_velocity_prob. For agents that switch, samples
+        new velocity values from the configured distribution.
 
         Args:
-            raw_agent_state: Generator state of the agent. A rtgym.dataclass.GeneratorState object.
+            raw_agent_state (RawAgentState): Generator state of the agent containing
+                current velocity norms and batch information.
         """
         # Randomly switch the velocity
         switch_velocity_idx = self._flip_coin(self.config.switch_velocity_prob, raw_agent_state.batch_size)
@@ -152,12 +232,24 @@ class AutonomousBehavior(BaseBehavior):
 
     def _compute_boundary_avoidance_adjustment(self, direction, perpend_angle):
         """Compute the boundary avoidance adjustment for the agent.
+        
+        Determines whether the agent is pointing toward a boundary and calculates
+        the complement angle needed to redirect the agent away from the boundary.
+        Uses the perpendicular angle to the nearest boundary to determine the
+        appropriate avoidance direction.
 
         Args:
-            direction: Direction of the agent. A np.ndarray of shape (batch_size, 1).
-            perpend_angle: Perpendicular angle of the agent. This is used to determine which side the agent
-                should be drifted away from such that the agent will not make a sharp turn when near
-                the boundary.
+            direction (np.ndarray): Current direction of the agent with shape (batch_size, 1).
+            perpend_angle (np.ndarray): Perpendicular angle to the nearest boundary.
+                This determines which side the agent should drift away from to avoid
+                sharp turns when near boundaries.
+                
+        Returns:
+            tuple: A tuple containing:
+                - pointing_boundary (np.ndarray): Binary array indicating if agent
+                  is pointing toward boundary (1) or away (0).
+                - complement_angle (np.ndarray): Angle adjustment needed to redirect
+                  agent away from boundary.
         """
         # Compute angle difference
         angle_diff = perpend_angle[..., np.newaxis] - direction
@@ -173,26 +265,26 @@ class AutonomousBehavior(BaseBehavior):
         return pointing_boundary, complement_angle
 
     def _init_raw_agent_state(self, init_pos=None, init_state=None):
-        """
-        This function will initialize the generator state of the agent. If the initial position is provided,
-        or the initial state is provided, the agent will start from the given initial position or state.
-        Otherwise, the agent will start from a random position.
-
-        When starting from a random position, the velocity and drift are sampled similar to the random explore
-        behavior used throughout this script.
-
-        In the generator state, the displacement and current coordinates are aligned in the current timestep.
-        That is, the coordinates are the current position of the agent, and the displacement is the displacement
-        that the agent will make in the next timestep.
+        """Initialize the generator state of the agent.
+        
+        Creates the initial state for trajectory generation. If initial position
+        or state is provided, uses that as starting point. Otherwise, places
+        agents at random valid positions and initializes velocity and drift
+        parameters according to the configured distributions.
+        
+        The generator state aligns displacement and coordinates such that
+        coordinates represent current position and displacement represents
+        the movement that will occur in the next timestep.
 
         Args:
-            init_pos: Initial position of the agent. A np.ndarray of shape (batch_size, 2).
-            init_state: Initial state of the agent. A rtgym.dataclass.AgentState object.
-                If None, the agent will start from a random position.
-                Else, the agent will start from the given initial state.
+            init_pos (np.ndarray, optional): Initial position with shape (batch_size, 2).
+            init_state (RawAgentState, optional): Complete initial state object.
+                If provided, takes precedence over init_pos.
         
         Returns:
-            raw_agent_state: Generator state of the agent. A rtgym.dataclass.RawAgentState object.
+            RawAgentState: Initialized generator state containing coordinates,
+                velocity norms, drift vectors, displacement vectors, and movement
+                direction with boundary avoidance applied.
         """
         raw_agent_state = RawAgentState()   
         if init_state is not None:
@@ -219,15 +311,25 @@ class AutonomousBehavior(BaseBehavior):
         return raw_agent_state
     
     def _avoid_boundary(self, direction, coords):
-        """
-        This will adjust the direction of the agent to avoid the boundary. This is different from
-        the boundary collision avoidance in the _update_coord function. This will apply a "force" to
-        push the agent away from the boundary, while the _update_coord function will only move the
-        agent if the next position is not valid.
+        """Adjust agent direction to avoid arena boundaries.
+        
+        Applies a "force" to push agents away from boundaries when they are
+        within the configured avoidance distance. This is a predictive avoidance
+        mechanism that prevents agents from getting too close to walls, separate
+        from collision detection in coordinate updates.
+        
+        Uses precomputed distance and angle maps to determine boundary proximity
+        and calculates appropriate direction adjustments to smoothly guide
+        agents away from boundaries.
 
         Args:
-            direction: Direction of the agent. A np.ndarray of shape (batch_size, 1).
-            coords: Coordinates of the agent. A np.ndarray of shape (batch_size, 2).
+            direction (np.ndarray): Current direction of agents with shape (batch_size, 1).
+            coords (np.ndarray): Current coordinates of agents with shape (batch_size, 2).
+            
+        Returns:
+            np.ndarray: Adjusted directions with boundary avoidance applied.
+                Agents pointing away from boundaries are unchanged, while those
+                pointing toward nearby boundaries have their direction modified.
         """
         if self.config.avoid_boundary_dist <= 0:
             return direction

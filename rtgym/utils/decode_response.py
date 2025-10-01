@@ -1,25 +1,20 @@
-r"""
-Utility functions for decoding sensory responses to spatial trajectories.
+"""
+Utility functions for decoding neuronal responses to spatial trajectories.
 
-This module contains algorithms for converting high-dimensional sensory responses
-(e.g., from place cells, grid cells) back to spatial coordinates using various
-optimization techniques including nearest neighbor search, spatial interpolation,
+This module contains methods for decoding high-dimensional neuronal responses
+(e.g., from place cells, grid cells) back to spatial coordinates using various 
+techniques including nearest neighbor search, spatial interpolation,
 and approximate search methods.
 
-Mathematical Background
------------------------
-
-Given sensory response vectors :math:`\mathbf{r} \in \mathbb{R}^d` and response maps
-:math:`\mathbf{M} \in \mathbb{R}^{H \times W \times d}`, we seek to find coordinates
+Given neuronal response vectors :math:`\\mathbf{r} \\in \\mathbb{R}^d` and response maps
+:math:`\\mathbf{M} \\in \\mathbb{R}^{H \\times W \\times d}`, we seek to find coordinates
 :math:`(y,x)` such that:
 
 .. math::
 
-    (y,x) = \arg\min_{(i,j)} \|\mathbf{r} - \mathbf{M}[i,j,:]\|_2^2
+    (y,x) = \\arg\\min_{(i,j)} \\|\\mathbf{r} - \\mathbf{M}[i,j,:]\\|_2^2
 
-where :math:`\|\cdot\|_2` denotes the Euclidean norm.
-
-Authors: RatatouGym Development Team
+where :math:`\\|\\cdot\\|_2` denotes the Euclidean norm.
 """
 
 import numpy as np
@@ -36,15 +31,11 @@ def decode_response_euclidean(
     response: np.ndarray,
     res_maps: np.ndarray
 ) -> Tuple[np.ndarray, bool]:
-    r"""
-    Decode sensory responses using brute-force Euclidean distance computation.
+    """Decode neuronal responses using brute-force Euclidean distance computation.
 
     This is the reference implementation that computes the exact nearest neighbor
     by evaluating the Euclidean distance between each query response and all
     template responses in the response maps.
-
-    Mathematical Formulation
-    ------------------------
 
     For response vector :math:`\mathbf{r} \in \mathbb{R}^d` and response map
     :math:`\mathbf{M} \in \mathbb{R}^{H \times W \times d}`, compute:
@@ -59,36 +50,28 @@ def decode_response_euclidean(
 
         \arg\min_{(i,j)} d^2(\mathbf{r}, \mathbf{M}[i,j])
 
-    Parameters
-    ----------
-    response : np.ndarray
-        Sensory response array of shape:
+    Args:
+        response (np.ndarray): Sensory response array of shape:
+            - (B, T, D) for trajectory decoding
+            - (B, D) for single state decoding
+            where B = batch size, T = time steps, D = feature dimensions
+        res_maps (np.ndarray): Response template maps of shape (D, H, W)
+            where H = arena height, W = arena width
 
-        - ``(B, T, D)`` for trajectory decoding
-        - ``(B, D)`` for single state decoding
+    Returns:
+        tuple: (decoded_coordinates, is_trajectory) where:
+            - decoded_coordinates (np.ndarray): Array of shape (B,T,2) or (B,2)
+              containing spatial coordinates
+            - is_trajectory (bool): True if input was trajectory (3D), False if state (2D)
 
-        where ``B`` = batch size, ``T`` = time steps, ``D`` = feature dimensions
-    res_maps : np.ndarray
-        Response template maps of shape ``(D, H, W)`` where ``H`` = arena height,
-        ``W`` = arena width
+    Note:
+        This method provides exact results but can be computationally expensive
+        for large arenas or high-dimensional feature spaces. Consider using
+        approximate methods for better performance.
 
-    Returns
-    -------
-    tuple of (np.ndarray, bool)
-        - **decoded_coordinates** : Array of shape ``(B,T,2)`` or ``(B,2)`` containing spatial coordinates
-        - **is_trajectory** : Boolean indicating if input was trajectory (3D) or state (2D)
-
-    Complexity
-    ----------
-    - **Time**: :math:`O(B \cdot T \cdot H \cdot W \cdot D)` for trajectory, :math:`O(B \cdot H \cdot W \cdot D)` for states
-    - **Space**: :math:`O(H \cdot W \cdot D)`
-
-    Note
-    ----
-    This method provides exact results but can be computationally expensive
-    for large arenas or high-dimensional feature spaces. Consider using
-    approximate methods for better performance.
-    r"""
+        Time complexity: :math:`O(B \cdot T \cdot H \cdot W \cdot D)` for trajectory, :math:`O(B \cdot H \cdot W \cdot D)` for states
+        Space complexity: :math:`O(H \cdot W \cdot D)`
+    """
     n_cells, H, W = res_maps.shape
 
     # Reshape response maps: (D, H, W) → (H*W, D)
@@ -130,48 +113,39 @@ def decode_response_kdtree(
     response: np.ndarray,
     res_maps: np.ndarray
 ) -> Tuple[np.ndarray, bool]:
-    r"""
-    Decode sensory responses using K-d tree for accelerated nearest neighbor search.
+    """Decode sensory responses using K-d tree for accelerated nearest neighbor search.
 
     K-d trees provide significant speedup over brute force methods, especially
     for high-dimensional feature spaces. The tree is constructed once and then
     queried efficiently for all response vectors.
 
-    Algorithm
-    ---------
-    1. Build K-d tree on flattened response map features
-    2. Query tree for nearest neighbors of each response vector
-    3. Map indices back to spatial coordinates
+    Algorithm:
+        1. Build K-d tree on flattened response map features
+        2. Query tree for nearest neighbors of each response vector
+        3. Map indices back to spatial coordinates
 
-    Parameters
-    ----------
-    response : np.ndarray
-        Sensory response array (see :func:`decode_response_euclidean`)
-    res_maps : np.ndarray
-        Response template maps (see :func:`decode_response_euclidean`)
+    Args:
+        response (np.ndarray): Sensory response array (see decode_response_euclidean)
+        res_maps (np.ndarray): Response template maps (see decode_response_euclidean)
 
-    Returns
-    -------
-    tuple of (np.ndarray, bool)
-        Same format as :func:`decode_response_euclidean`
+    Returns:
+        tuple: Same format as decode_response_euclidean
 
-    Complexity
-    ----------
-    - **Tree construction**: :math:`O(H \cdot W \cdot D \cdot \log(H \cdot W))`
-    - **Query**: :math:`O(B \cdot T \cdot \log(H \cdot W))` for trajectory
-    - **Space**: :math:`O(H \cdot W \cdot D)`
+    Note:
+        Complexity:
+        - Tree construction: :math:`O(H \cdot W \cdot D \cdot \log(H \cdot W))`
+        - Query: :math:`O(B \cdot T \cdot \log(H \cdot W))` for trajectory
+        - Space: :math:`O(H \cdot W \cdot D)`
 
-    Advantages
-    ----------
-    - Significantly faster than brute force for large arenas
-    - Exact nearest neighbor results
-    - Memory efficient tree structure
+        Advantages:
+        - Significantly faster than brute force for large arenas
+        - Exact nearest neighbor results
+        - Memory efficient tree structure
 
-    Limitations
-    -----------
-    - Performance degrades in very high dimensions (curse of dimensionality)
-    - Tree construction overhead for small datasets
-    r"""
+        Limitations:
+        - Performance degrades in very high dimensions (curse of dimensionality)
+        - Tree construction overhead for small datasets
+    """
     n_cells, H, W = res_maps.shape
 
     # Prepare response maps and coordinates (same as euclidean method)
@@ -215,15 +189,11 @@ def decode_response_torch(
     device: Optional[Union[str, torch.device]] = None,
     chunk_size: int = 1024
 ) -> Tuple[np.ndarray, bool]:
-    r"""
-    Decode sensory responses using PyTorch for GPU-accelerated computation.
+    """Decode sensory responses using PyTorch for GPU-accelerated computation.
 
     This implementation leverages PyTorch's optimized tensor operations and
     optional GPU acceleration for faster distance computation. Memory usage
     is controlled through chunked processing.
-
-    Mathematical Optimization
-    -------------------------
 
     Instead of computing :math:`\|\mathbf{r} - \mathbf{M}\|^2` directly, we use the identity:
 
@@ -237,34 +207,29 @@ def decode_response_torch(
 
         \text{distance} \propto -2\langle\mathbf{r},\mathbf{M}\rangle + \|\mathbf{M}\|^2
 
-    Parameters
-    ----------
-    response : np.ndarray or torch.Tensor
-        Sensory response array (numpy or torch tensor)
-    res_maps : np.ndarray or torch.Tensor
-        Response template maps (numpy or torch tensor)
-    device : str, torch.device, or None
-        Computation device (``'cpu'``, ``'cuda'``, or torch.device object).
-        If None, automatically selects CUDA if available
-    chunk_size : int, default=1024
-        Number of responses to process simultaneously.
-        Larger values use more memory but may be faster
+    Args:
+        response (Union[np.ndarray, torch.Tensor]): Sensory response array
+            (numpy or torch tensor)
+        res_maps (Union[np.ndarray, torch.Tensor]): Response template maps
+            (numpy or torch tensor)
+        device (Optional[Union[str, torch.device]]): Computation device
+            ('cpu', 'cuda', or torch.device object). If None, automatically
+            selects CUDA if available
+        chunk_size (int): Number of responses to process simultaneously.
+            Larger values use more memory but may be faster. Defaults to 1024.
 
-    Returns
-    -------
-    tuple of (np.ndarray, bool)
-        ``(decoded_coordinates, is_trajectory)`` as numpy arrays
+    Returns:
+        tuple: (decoded_coordinates, is_trajectory) as numpy arrays
 
-    Performance Notes
-    -----------------
-    - GPU acceleration provides 10-100x speedup for large problems
-    - Chunked processing prevents out-of-memory errors
-    - Automatic mixed precision could be added for further optimization
+    Note:
+        Performance:
+        - GPU acceleration provides 10-100x speedup for large problems
+        - Chunked processing prevents out-of-memory errors
+        - Automatic mixed precision could be added for further optimization
 
-    Memory Usage
-    ------------
-    Peak memory ≈ ``chunk_size × H × W × 4`` bytes (for float32)
-    r"""
+        Memory Usage:
+        Peak memory ≈ ``chunk_size × H × W × 4`` bytes (for float32)
+    """
     # Device selection and setup
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -343,51 +308,41 @@ def decode_response_faiss(
     res_maps: np.ndarray,
     n_clusters: int = 100
 ) -> Tuple[np.ndarray, bool]:
-    r"""
-    Decode sensory responses using Facebook AI Similarity Search (FAISS).
+    """Decode sensory responses using Facebook AI Similarity Search (FAISS).
 
     FAISS provides state-of-the-art performance for large-scale nearest neighbor
     search through optimized indexing structures. This implementation uses
     Inverted File Index (IVF) with exact search within clusters.
 
-    Algorithm
-    ---------
-    1. Cluster response map features into ``n_clusters`` groups using k-means
-    2. Build inverted index mapping clusters to their members
-    3. For each query, search only relevant clusters for nearest neighbors
-    4. Return exact nearest neighbor within searched clusters
+    Algorithm:
+        1. Cluster response map features into n_clusters groups using k-means
+        2. Build inverted index mapping clusters to their members
+        3. For each query, search only relevant clusters for nearest neighbors
+        4. Return exact nearest neighbor within searched clusters
 
-    Parameters
-    ----------
-    response : np.ndarray
-        Sensory response array
-    res_maps : np.ndarray
-        Response template maps
-    n_clusters : int, default=100
-        Number of clusters for IVF index:
+    Args:
+        response (np.ndarray): Sensory response array
+        res_maps (np.ndarray): Response template maps
+        n_clusters (int): Number of clusters for IVF index. Defaults to 100.
+            - More clusters: faster search, potentially lower recall
+            - Fewer clusters: slower search, higher recall
+            - Recommended: :math:`\sqrt{\text{number of points}}` to :math:`\text{n_points}/39`
 
-        - More clusters: faster search, potentially lower recall
-        - Fewer clusters: slower search, higher recall
-        - Recommended: :math:`\sqrt{\text{number of points}}` to :math:`\text{n_points}/39`
+    Returns:
+        tuple: (decoded_coordinates, is_trajectory)
 
-    Returns
-    -------
-    tuple of (np.ndarray, bool)
-        ``(decoded_coordinates, is_trajectory)``
+    Note:
+        Performance characteristics:
+        - Index build time: :math:`O(H \cdot W \cdot D \cdot \log(\text{n_clusters}))`
+        - Query time: :math:`O(B \cdot T \cdot \sqrt{H \cdot W})` approximately
+        - Memory usage: ~1.5x the size of original data
 
-    Performance Characteristics
-    ---------------------------
-    - **Index build time**: :math:`O(H \cdot W \cdot D \cdot \log(\text{n_clusters}))`
-    - **Query time**: :math:`O(B \cdot T \cdot \sqrt{H \cdot W})` approximately
-    - **Memory usage**: ~1.5x the size of original data
-
-    Notes
-    -----
-    - Requires FAISS library installation
-    - Optimized for very large datasets (>10k points)
-    - Can utilize GPU acceleration with appropriate FAISS build
-    - May return approximate results depending on ``nprobe`` parameter
-    r"""
+        Requirements:
+        - Requires FAISS library installation
+        - Optimized for very large datasets (>10k points)
+        - Can utilize GPU acceleration with appropriate FAISS build
+        - May return approximate results depending on ``nprobe`` parameter
+    """
     n_cells, H, W = res_maps.shape
 
     # Prepare data (same preprocessing as other methods)
@@ -453,22 +408,17 @@ def decode_response_interpolation(
     n_anchors: int = 1000,
     random_state: int = 42
 ) -> Tuple[np.ndarray, bool]:
-    r"""
-    Decode sensory responses using spatial interpolation with anchor points.
+    """Decode sensory responses using spatial interpolation with anchor points.
 
     This method exploits the spatial continuity assumption: nearby locations
     should have similar sensory responses. Instead of exact nearest neighbor
     search, it interpolates coordinates from multiple nearby anchor points.
 
-    Algorithm
-    ---------
-    1. Select ``n_anchors`` representative points using k-means clustering
-    2. For each query response, find ``k`` nearest anchor points
-    3. Compute inverse-distance weighted interpolation of anchor coordinates
-    4. Return interpolated coordinates (may be non-integer)
-
-    Mathematical Formulation
-    ------------------------
+    Algorithm:
+        1. Select n_anchors representative points using k-means clustering
+        2. For each query response, find k nearest anchor points
+        3. Compute inverse-distance weighted interpolation of anchor coordinates
+        4. Return interpolated coordinates (may be non-integer)
 
     Given :math:`k` nearest anchors with coordinates :math:`\mathbf{c}_1,\ldots,\mathbf{c}_k`
     and distances :math:`d_1,\ldots,d_k`:
@@ -481,43 +431,34 @@ def decode_response_interpolation(
 
         \hat{\mathbf{c}} &= \sum_{i=1}^k \tilde{w}_i \cdot \mathbf{c}_i \quad \text{(interpolated coordinate)}
 
-    Parameters
-    ----------
-    response : np.ndarray
-        Sensory response array
-    res_maps : np.ndarray
-        Response template maps
-    n_anchors : int, default=1000
-        Number of anchor points to select:
+    Args:
+        response (np.ndarray): Sensory response array
+        res_maps (np.ndarray): Response template maps
+        n_anchors (int): Number of anchor points to select. Defaults to 1000.
+            - More anchors: better spatial resolution, slower computation
+            - Fewer anchors: faster computation, lower spatial precision
+        random_state (int): Random seed for reproducible anchor selection.
+            Defaults to 42.
 
-        - More anchors: better spatial resolution, slower computation
-        - Fewer anchors: faster computation, lower spatial precision
-    random_state : int, default=42
-        Random seed for reproducible anchor selection
+    Returns:
+        tuple: (decoded_coordinates, is_trajectory)
+            Coordinates are rounded to integers and clipped to valid arena bounds
 
-    Returns
-    -------
-    tuple of (np.ndarray, bool)
-        ``(decoded_coordinates, is_trajectory)``
-        Coordinates are rounded to integers and clipped to valid arena bounds
+    Note:
+        Advantages:
+        - Smooth spatial interpolation reduces noise
+        - Faster than exact nearest neighbor for large datasets
+        - Naturally handles uncertainty through weighted averaging
 
-    Advantages
-    ----------
-    - Smooth spatial interpolation reduces noise
-    - Faster than exact nearest neighbor for large datasets
-    - Naturally handles uncertainty through weighted averaging
+        Limitations:
+        - May not find exact nearest neighbor
+        - Requires tuning of n_anchors parameter
+        - Assumes local spatial smoothness in response patterns
 
-    Limitations
-    -----------
-    - May not find exact nearest neighbor
-    - Requires tuning of ``n_anchors`` parameter
-    - Assumes local spatial smoothness in response patterns
-
-    Complexity
-    ----------
-    - **Anchor selection**: :math:`O(H \cdot W \cdot D \cdot \log(\text{n_anchors}))`
-    - **Query**: :math:`O(B \cdot T \cdot \log(\text{n_anchors}))`
-    r"""
+        Complexity:
+        - Anchor selection: :math:`O(H \cdot W \cdot D \cdot \log(\text{n_anchors}))`
+        - Query: :math:`O(B \cdot T \cdot \log(\text{n_anchors}))`
+    """
     n_cells, H, W = res_maps.shape
 
     # Standard preprocessing
@@ -602,21 +543,15 @@ def create_dataclass_result(
     pred_coords: np.ndarray,
     is_trajectory: bool
 ) -> Union[Trajectory, AgentState]:
-    r"""
-    Create appropriate dataclass result from decoded coordinates.
+    """Create appropriate dataclass result from decoded coordinates.
 
-    Parameters
-    ----------
-    pred_coords : np.ndarray
-        Decoded coordinate array
-    is_trajectory : bool
-        Whether to create Trajectory or AgentState object
+    Args:
+        pred_coords (np.ndarray): Decoded coordinate array
+        is_trajectory (bool): Whether to create Trajectory or AgentState object
 
-    Returns
-    -------
-    Trajectory or AgentState
-        Dataclass object containing the coordinates
-    r"""
+    Returns:
+        Union[Trajectory, AgentState]: Dataclass object containing the coordinates
+    """
     if is_trajectory:
         return Trajectory(coord=pred_coords)
     else:

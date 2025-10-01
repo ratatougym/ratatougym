@@ -23,10 +23,10 @@ class HeadDirectionCell(DisplacementAbs):
             sigma (float): Standard deviation of the Gaussian tuning kernel. Defaults to 2.
             
     Attributes:
-        sens_type (str): Sensory type identifier 'head_direction_cell'.
+        neuron_type (str): Sensory type identifier 'head_direction_cell'.
     """
     
-    sens_type = 'head_direction_cell'
+    neuron_type = 'head_direction_cell'
     
     def __init__(self, arena, **kwargs):
         super().__init__(arena, **kwargs)
