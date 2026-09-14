@@ -33,20 +33,28 @@ class TrajectoryGenerator:
         self.initialized = True
 
     def _set_config(self, profile):
-        # Retain upstream defaults and the conversion used by boundary avoidance.
+        # Set the mean and spread of sampled speeds.
         self.spd_mean = float(profile['spd_mean'])
         spd_sd = profile.get('spd_sd', 0)
         self.spd_sd = float(spd_sd)
+
+        # Set how quickly speed and direction follow their targets.
         alpha_spd = profile.get('alpha_spd', 0.1)
         self.alpha_spd = float(alpha_spd)
         alpha_dir = profile.get('alpha_dir', 0.1)
         self.alpha_dir = float(alpha_dir)
+
+        # Configure target switching and independent head variation.
         self.switch_dir_prob = float(profile['switch_dir_prob'])
         self.switch_spd_prob = float(profile['switch_spd_prob'])
         look_around_scale = profile.get('look_around_scale', 0)
         self.look_around_scale = float(look_around_scale)
+
+        # Validate the speed distribution.
         if self.spd_mean <= 0 or self.spd_sd < 0:
             raise ValueError('spd_mean must be positive and spd_sd non-negative.')
+
+        # Validate smoothing weights and probabilities.
         bounded = ('alpha_spd', 'alpha_dir', 'switch_dir_prob',
                    'switch_spd_prob', 'look_around_scale')
         for name in bounded:
@@ -54,12 +62,16 @@ class TrajectoryGenerator:
             if not 0 <= value <= 1:
                 raise ValueError(f'{name} must be in [0, 1].')
 
+        # Leave boundary steering disabled when no level is provided.
         self.avoid_boundary_dist = -1
         avoidance = profile.get('boundary_avoidance')
         if avoidance is not None:
             avoidance = float(avoidance)
             typical_speed = self.spd_mean * self.gym.t_res / 1e3
-            distance = 12.0 * typical_speed * (0.5 + 0.5 * avoidance)
+
+            # Scale the avoidance distance using the original conversion.
+            avoidance_scale = 0.5 + 0.5 * avoidance
+            distance = 12.0 * typical_speed * avoidance_scale
             self.avoid_boundary_dist = max(distance, 1e-6)
 
     def generate_trajectory(self, duration_ts, batch_size, init_state=None, init_pos=None):
@@ -86,12 +98,16 @@ class TrajectoryGenerator:
                 self._update_targets(state, ts)
                 self._update_dynamics(state)
                 self._avoid_boundary(state)
+
+                # Reject proposed moves that end inside walls.
                 proposed = state.coord + state.disp
                 indices = proposed.long()
                 valid = self.gym.arena.validate_index(indices)
                 proposed[~valid] = state.coord[~valid]
                 state.coord = proposed
                 state.head_dir = self.head_dirs[:, ts]
+
+            # Record position and motion for this timestep.
             coord[:, ts] = state.coord
             spd[:, ts] = state.spd
             mv_dir[:, ts] = state.mv_dir
@@ -131,10 +147,16 @@ class TrajectoryGenerator:
         log_variance = torch.log(variance_ratio)
         sigma = log_variance ** 0.5
         sigma = sigma.item()
-        mean_ratio = mean**2 / (mean**2 + sd**2) ** 0.5
+
+        # Convert the desired mean into the log-normal location.
+        second_moment = mean**2 + sd**2
+        root_moment = second_moment ** 0.5
+        mean_ratio = mean**2 / root_moment
         mean_ratio = torch.tensor(mean_ratio, device=self.device)
         mu = torch.log(mean_ratio)
         mu = mu.item()
+
+        # Draw on CPU, then transfer the sampled speeds.
         distribution = torch.distributions.LogNormal(mu, sigma)
         samples = distribution.sample(shape)
         return samples.to(self.device)
@@ -147,12 +169,16 @@ class TrajectoryGenerator:
                 variation = torch.randn(batch_size, n_steps, 1, device=self.device)
                 variation = variation * scale
                 variation = variation.transpose(1, 2)
+
+                # Smooth head-angle variation along time.
                 kernel = torch.ones(1, 1, 5, device=self.device)
                 kernel = kernel / 5
                 variation = F.conv1d(variation, kernel, padding=2)
                 variation = variation.transpose(1, 2)
             else:
                 variation = torch.zeros(batch_size, n_steps, 1, device=self.device)
+
+            # Convert the perturbed angles back into unit vectors.
             angle = torch.atan2(dirs[:, :, 1], dirs[:, :, 0])
             variation = variation.squeeze(-1)
             angle = angle + variation
@@ -165,6 +191,8 @@ class TrajectoryGenerator:
             return dirs.clone()
         noise = torch.randn(batch_size, n_steps, ndim, device=self.device)
         noise = noise * scale
+
+        # Smooth each spatial component along time.
         kernel = torch.ones(1, 1, 5, device=self.device)
         kernel = kernel / 5
         for axis in range(ndim):
@@ -172,6 +200,8 @@ class TrajectoryGenerator:
             component = component.transpose(1, 2)
             component = F.conv1d(component, kernel, padding=2)
             noise[:, :, axis:axis + 1] = component.transpose(1, 2)
+
+        # Renormalize the perturbed three-dimensional heading.
         head_dir = dirs + noise
         norms = head_dir.norm(dim=-1, keepdim=True)
         norms = norms.clamp_min(1e-8)
@@ -188,26 +218,36 @@ class TrajectoryGenerator:
                 raise TypeError('EMA continuation requires a AgentState.')
             state = init_state.clone()
             state.to(self.device)
+
+        # Sample a free starting position when none was supplied.
         if state.coord is None:
             free_space = self.gym.arena.free_space_numpy
             n_free = len(free_space)
             indices = torch.randint(n_free, (batch_size,), device=self.device)
             free_space = torch.as_tensor(free_space, device=self.device)
             state.coord = free_space[indices].float()
+
+        # Validate the coordinate shape before map lookup.
         state.coord = state.coord.float()
         expected_shape = (batch_size, self.gym.arena.ndim)
         if state.coord.shape != expected_shape:
             raise ValueError(f'Initial coordinates must have shape {expected_shape}.')
+
+        # Require every initial coordinate to lie in free space.
         indices = state.coord.long()
         valid = self.gym.arena.validate_index(indices)
         if not valid.all():
             raise ValueError('Initial coordinates must be in free space.')
+
+        # Fill missing speed and direction targets.
         if state.spd is None or state.spd_target is None:
             state.spd = self.target_spds[:, 0]
             state.spd_target = self.target_spds[:, 0]
         if state.mv_dir is None or state.mv_dir_target is None:
             state.mv_dir = self.target_dirs[:, 0]
             state.mv_dir_target = self.target_dirs[:, 0]
+
+        # Use the sampled head direction when continuing without one.
         if state.head_dir is None:
             state.head_dir = self.head_dirs[:, 0]
         return state
@@ -216,13 +256,22 @@ class TrajectoryGenerator:
         spd_mask = self.switch_spd_mask[:, ts]
         if spd_mask.any():
             state.spd_target[spd_mask] = self.target_spds[spd_mask, ts]
+
+        # Refresh selected direction targets.
         dir_mask = self.switch_dir_mask[:, ts]
         if dir_mask.any():
             state.mv_dir_target[dir_mask] = self.target_dirs[dir_mask, ts]
 
     def _update_dynamics(self, state):
-        state.spd = (1.0 - self.alpha_spd) * state.spd + self.alpha_spd * state.spd_target
-        direction = (1.0 - self.alpha_dir) * state.mv_dir + self.alpha_dir * state.mv_dir_target
+        # Blend the previous speed with its sampled target.
+        previous_speed = (1.0 - self.alpha_spd) * state.spd
+        target_speed = self.alpha_spd * state.spd_target
+        state.spd = previous_speed + target_speed
+
+        # Blend direction vectors before restoring unit length.
+        previous_dir = (1.0 - self.alpha_dir) * state.mv_dir
+        target_dir = self.alpha_dir * state.mv_dir_target
+        direction = previous_dir + target_dir
         norms = direction.norm(dim=-1, keepdim=True)
         norms = norms.clamp_min(1e-8)
         state.mv_dir = direction / norms
@@ -230,12 +279,16 @@ class TrajectoryGenerator:
     def _avoid_boundary(self, state):
         if self.avoid_boundary_dist <= 0:
             return
+
+        # Build bounded indices for the wall-distance maps.
         indices = []
         for axis, size in enumerate(self.gym.arena.dimensions):
             index = state.coord[:, axis].long()
             index = index.clamp(0, size - 1)
             indices.append(index)
         indices = tuple(indices)
+
+        # Restrict steering to agents close enough to a wall.
         coefficient = self.distance_map[indices]
         active = coefficient > 1e-2
         if not active.any():
@@ -249,6 +302,8 @@ class TrajectoryGenerator:
         dot = product.sum(dim=-1)
         toward_wall = dot < 0
         toward_wall = toward_wall.float()
+
+        # Remove the component pointing along the wall normal.
         dot_column = dot.unsqueeze(-1)
         tangent = direction - dot_column * normal
         tangent_norm = tangent.norm(dim=-1, keepdim=True)
@@ -261,9 +316,13 @@ class TrajectoryGenerator:
         mean_spd = self.spd_mean / 1e3 * self.gym.t_res
         speed_scale = spd / (mean_spd + 1e-8)
         speed_scale = speed_scale.clamp(0.5, 3.0)
+
+        # Blend toward the tangent direction and restore unit length.
         blend = coefficient[active] * toward_wall * speed_scale
         blend = blend.unsqueeze(-1)
-        direction = (1 - blend) * direction + blend * tangent
+        retained_dir = (1 - blend) * direction
+        tangent_dir = blend * tangent
+        direction = retained_dir + tangent_dir
         norms = direction.norm(dim=-1, keepdim=True)
         norms = norms.clamp_min(1e-8)
         state.mv_dir[active] = direction / norms
@@ -271,16 +330,22 @@ class TrajectoryGenerator:
     def _recompute_maps(self):
         if self.avoid_boundary_dist <= 0:
             return
+
+        # Compute the distance to walls and its steering decay.
         free_mask = self.gym.arena.inv_arena_map.astype(np.uint8)
         distance = distance_transform_edt(free_mask)
         distance = distance.astype(np.float32)
         exponent = -(distance**2 / self.avoid_boundary_dist)
         distance_map = np.exp(exponent)
+
+        # Normalize the distance gradient into wall-normal vectors.
         gradients = np.gradient(distance)
         normal_map = np.stack(gradients, axis=-1)
         norms = np.linalg.norm(normal_map, axis=-1, keepdims=True)
         norms = np.maximum(norms, 1e-8)
         normal_map = normal_map / norms
+
+        # Store both maps on the control device.
         self.distance_map = torch.as_tensor(distance_map, device=self.device)
         self.normal_map = torch.as_tensor(normal_map, device=self.device)
 
@@ -291,16 +356,22 @@ class TrajectoryGenerator:
         """Apply commanded grid-cell displacement with the same wall rejection."""
         if state is None or state.coord is None:
             raise ValueError('Spawn an agent before stepping.')
+
+        # Copy state before applying the supplied motion vectors.
         state = state.clone()
         state.to(self.device)
         state.mv_dir = torch.as_tensor(mv_dir, device=self.device)
         state.spd = torch.as_tensor(spd, device=self.device)
         state.head_dir = torch.as_tensor(head_dir, device=self.device)
+
+        # Validate the batched direction and speed shapes.
         expected = state.coord.shape
         if state.mv_dir.shape != expected or state.head_dir.shape != expected:
             raise ValueError('Direction vectors must match the coordinate shape.')
         if state.spd.shape != (expected[0], 1):
             raise ValueError('spd must have shape (batch, 1).')
+
+        # Apply the command, retaining positions for rejected moves.
         proposed = state.coord + state.disp
         indices = proposed.long()
         valid = self.gym.arena.validate_index(indices)

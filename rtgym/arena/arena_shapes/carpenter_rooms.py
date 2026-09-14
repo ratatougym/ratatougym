@@ -9,6 +9,8 @@ def generate_carpenter_rooms_arena(sr, **kwargs):
     room_width = int(room_width)
     room_height = kwargs.get("room_height", 90) / sr
     room_height = int(room_height)
+
+    # Set corridor, wall and doorway dimensions.
     corridor_width = kwargs.get("corridor_width", 40) / sr
     corridor_width = int(corridor_width)
     wall_thickness = kwargs.get("wall_thickness", 1) / sr

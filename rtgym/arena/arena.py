@@ -87,6 +87,8 @@ class Arena:
             arena_map = arena_map.detach()
             arena_map = arena_map.cpu()
             arena_map = arena_map.numpy()
+
+        # Validate dimensions before replacing the cached geometry.
         if arena_map.ndim not in (2, 3):
             raise ValueError('Arena maps must have two or three dimensions.')
         self._tensor_maps.clear()
@@ -186,6 +188,8 @@ class Arena:
             'maze_0': generate_maze_0_arena,
             'maze_1': generate_maze_1_arena,
             'maze_2': generate_maze_2_arena,
+
+            # Additional training and navigation layouts.
             'trainer_0': generate_trainer_0_arena,
             'box': generate_box_arena,
             'hairpin': generate_hairpin_arena,
@@ -220,12 +224,16 @@ class Arena:
             return self._validate_tensor_index(pos)
         if len(pos.shape) == 1:
             pos = pos[np.newaxis, :]
+
+        # Validate coordinate dimensions and bounds.
         # check dimension
         assert pos.shape[1] == self.ndim, "pos must match the arena dimension"
         # check if the indices are defined
         is_negative = np.all(pos >= 0, axis=1)
         is_exceed = np.all(pos < self.dimensions, axis=1)
         valid_idx = np.logical_and(is_negative, is_exceed)
+
+        # Look up occupancy only at indices that lie inside the grid.
         is_wall = np.full(pos.shape[0], True)
         is_wall[valid_idx] = self.arena_map[tuple(pos[valid_idx].T)] == 1
         return np.logical_not(is_wall)
@@ -239,6 +247,8 @@ class Arena:
             in_bounds = in_bounds & (index >= 0) & (index < size)
             index = index.clamp(0, size - 1)
             indices.append(index)
+
+        # Use bounded indices to query the cached occupancy tensor.
         indices = tuple(indices)
         arena_map = self.tensor_map(pos.device)
         free = arena_map[indices] == 0
@@ -254,6 +264,8 @@ class Arena:
         # plot two bar legend indicating the wall and the free space
         ax.bar([0, 0], [0, 0], color='#888', label='wall')
         ax.bar([0, 0], [0, 0], color='#eee', label='free space')
+
+        # Label the interior dimensions and spatial coordinate axes.
         ax.set_title(rf'Arena (size={self.dimensions[1]-10}x{self.dimensions[0]-10} $pixels^2$, excluding border)')
         ax.set_xticks(np.linspace(5, self.dimensions[1]-5, 5))
         ax.set_xticklabels(np.linspace(0, self.dimensions[1]-10, 5)*self.spatial_resolution)

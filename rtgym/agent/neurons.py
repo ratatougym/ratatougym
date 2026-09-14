@@ -18,6 +18,8 @@ from rtgym.utils.decode_response import (
     decode_response_faiss,
     decode_response_interpolation
 )
+
+# Cell implementations are grouped by their tuning variables.
 from .sensory.spatial_modulated import *
 from .sensory.spatial_modulated.sm_base import SMBase
 from .sensory.movement_modulated import *
@@ -134,6 +136,8 @@ class Neurons:
                 return_keys = list(keys)
             else:
                 raise ValueError(f"Unknown keys: {keys}")
+
+        # Apply name or type filters when explicit keys are absent.
         elif str_filter is not None:
             return_keys = [key for key in self.neuron_groups.keys() if str_filter in key]
         elif type_filter is not None:
@@ -180,6 +184,8 @@ class Neurons:
             assert self.neuron_groups[key].sens_category == 'spatial_modulated', (
                 "Only spatial_modulated sensory cells can be decoded into a trajectory"
             )
+
+            # Convert cached tensor maps for the NumPy decoding routines.
             response_map = self.neuron_groups[key].response_map
             if isinstance(response_map, torch.Tensor):
                 response_map = response_map.detach()
@@ -252,6 +258,8 @@ class Neurons:
         elif method == "torch_euclidean" and use_torch:
             chunk_size = kwargs.get('chunk_size', 1024)
             pred_coords, is_trajectory = decode_response_torch(response, res_maps, device, chunk_size)
+
+        # Select the approximate or interpolated decoding method.
         elif method == "faiss":
             n_clusters = kwargs.get('n_clusters', 100)
             pred_coords, is_trajectory = decode_response_faiss(response, res_maps, n_clusters)
@@ -300,16 +308,22 @@ class Neurons:
             if isinstance(sensory, SMBase):
                 output_format = 'tensor' if return_format == 'dict' else return_format
                 response = sensory.get_response(agent_data, output_format, query_device)
+
+            # Retain NumPy equations for movement-modulated cells.
             else:
                 data = agent_data
                 if tensor_input:
                     if numpy_data is None:
                         numpy_data = agent_data.as_numpy()
                     data = numpy_data
+
+                # Convert movement responses to the requested output backend.
                 response = sensory.get_response(data)
                 if return_format in ('tensor', 'dict'):
                     response = torch.as_tensor(response, dtype=torch.float32, device=query_device)
             responses[key] = response
+
+        # Return named groups or concatenate their feature dimensions.
         if return_format == 'dict':
             return responses
         if not responses:

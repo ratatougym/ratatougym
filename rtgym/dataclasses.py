@@ -18,6 +18,8 @@ class AgentState(NumPyAgentState):
                  mv_dir_target=None, head_dir=None, device='cpu'):
         self.device = torch.device(device)
         values = (coord, spd, spd_target, mv_dir, mv_dir_target, head_dir)
+
+        # Convert supplied state fields on the selected device.
         for name, value in zip(self.fields, values):
             if value is not None:
                 value = torch.as_tensor(value, device=self.device)
@@ -115,10 +117,14 @@ class Trajectory(NumPyTrajectory):
     def __init__(self, coord=None, head_dir=None, spd=None, mv_dir=None, device='cpu'):
         self.device = torch.device(device)
         values = (coord, spd, mv_dir, head_dir)
+
+        # Check that provided trajectory fields share batch and time axes.
         shape = None
         for name, value in zip(self.fields, values):
             if value is not None:
                 value = torch.as_tensor(value, device=self.device)
+
+                # Validate the shape before accepting this trajectory field.
                 if value.ndim != 3:
                     raise ValueError('Trajectory fields must have batch, time and feature axes.')
                 if shape is not None and value.shape[:2] != shape:
@@ -176,6 +182,8 @@ class Trajectory(NumPyTrajectory):
             batch_index = [batch_index]
         if isinstance(time_index, int):
             time_index = [time_index]
+
+        # Expand ellipses into complete axis selections.
         if batch_index is Ellipsis:
             batch_index = slice(None)
         if time_index is Ellipsis:
@@ -191,8 +199,12 @@ class Trajectory(NumPyTrajectory):
                 selected = selected[:, time_index]
                 values[name] = selected.clone()
                 selected_shape = selected.shape
+
+        # Reject empty data before deciding the output container.
         if selected_shape is None:
             raise ValueError('Cannot index an empty trajectory.')
+
+        # Collapse the time axis for a single selected timestep.
         if select_time and selected_shape[1] == 1 and selected_shape[0] >= 1:
             for name, value in values.items():
                 values[name] = value.squeeze(1)
@@ -244,6 +256,8 @@ class Trajectory(NumPyTrajectory):
         spd = disp.norm(dim=-1, keepdim=True)
         denominator = spd.clamp_min(1e-12)
         mv_dir = disp / denominator
+
+        # Convert the original angle convention into head vectors.
         angle = torch.as_tensor(traj.hd, dtype=torch.float32, device=device)
         angle = angle.squeeze(-1)
         row = torch.sin(angle)

@@ -38,9 +38,13 @@ class Behavior:
             init_pos = init_state.coord.detach()
             init_pos = init_pos.cpu()
             init_pos = init_pos.numpy()
+
+        # Convert the public sample count for the original sampler.
         duration = self.gym.to_sec(duration_ts)
         traj, raw_state = self.autonomous.generate_trajectory(duration, batch_size, init_pos, raw_state)
         self.raw_state = raw_state
+
+        # Adapt the generated arrays to the public tensor interface.
         traj = Trajectory.from_numpy(traj, device=self.device)
         self.cur_state = traj[:, -1]
         return traj, self.cur_state

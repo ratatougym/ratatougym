@@ -11,6 +11,8 @@ def generate_hairpin_arena(sr, **kwargs):
     alley_width = int(alley_width)
     alley_height = kwargs.get("alley_height", 100) / sr
     alley_height = int(alley_height)
+
+    # Set wall thickness and the gap used for each turn.
     wall_thickness = kwargs.get("wall_thickness", 1) / sr
     wall_thickness = int(wall_thickness)
     default_gap = kwargs.get("alley_width", 15)

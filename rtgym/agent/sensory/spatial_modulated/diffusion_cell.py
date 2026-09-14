@@ -24,6 +24,8 @@ class DiffusionCell(SMBase):
         self.magnitude = magnitude
         self.normalize = normalize
         self.device = torch.device(device)
+
+        # Seed field generation independently of the control RNG.
         self.field_rng = torch.Generator(device='cpu')
         if seed is not None:
             field_seed = hash_seed(seed, sensory_key)
@@ -47,6 +49,8 @@ class DiffusionCell(SMBase):
             means = means.clamp(min=1e-8)
             scale = self.magnitude / means
             cells = cells * scale
+
+        # Mask wall cells after matching the requested mean response.
         arena_map = self.arena.tensor_map(self.device)
         free_mask = arena_map == 0
         free_mask = free_mask.float()
@@ -75,6 +79,8 @@ class DiffusionCell(SMBase):
         neighbour_weight = conv(mask, kernel)
         neighbour_weight = neighbour_weight[0, 0]
         neighbour_weight = neighbour_weight.clamp(min=1e-8)
+
+        # Diffuse only through the available free neighbours.
         cells = cells * free_mask
         for _ in range(n_iters):
             field = cells.unsqueeze(1)

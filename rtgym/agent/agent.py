@@ -41,11 +41,15 @@ class Agent:
             device = profile.get('device', self.device)
             control = TrajectoryGenerator(self.gym, bhv_device=device)
             control.init_from_profile(profile)
+
+        # Use the retained NumPy model when explicitly requested.
         elif control_type == 'random_walk':
             control = Behavior(self.gym)
             control.init_from_profile(profile)
         else:
             raise ValueError(f'Unknown control_type: {control_type}')
+
+        # Publish the initialized control and its profile.
         self.control = control
         self.control_profile = profile
 
@@ -76,11 +80,15 @@ class Agent:
             raise ValueError('duration_ts must be a positive integer number of timesteps.')
         if not isinstance(batch_size, int) or batch_size < 1:
             raise ValueError('batch_size must be a positive integer.')
+
+        # Validate optional behavior before advancing state.
         if not 0 <= pause_prob <= 1:
             raise ValueError('pause_prob must be in [0, 1].')
         if kwargs:
             names = tuple(kwargs)
             raise TypeError(f'Unknown trajectory options: {names}')
+
+        # Continue from the last state unless another was supplied.
         state = self.state
         if init_state is None and state is not None and state.coord is not None:
             init_state = state
@@ -92,12 +100,16 @@ class Agent:
             paused = draws < pause_prob
             start_pos = traj.coord[paused, 0]
             traj.coord[paused] = start_pos[:, None]
+
+            # Keep motion and continuation state aligned with paused trials.
             traj.spd[paused] = 0
             traj.head_dir[paused] = 0
             state.coord[paused] = start_pos
             state.spd[paused] = 0
             if isinstance(self.control, Behavior):
                 self.control.raw_state = None
+
+        # Publish the final state and move the trajectory to the output device.
         self.control.cur_state = state
         return traj.to(self.device)
 
