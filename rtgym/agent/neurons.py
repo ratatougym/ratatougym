@@ -1,5 +1,5 @@
 """
-The sensory module contains the Sensory class which is responsible for 
+The sensory module contains the Neurons class which is responsible for 
 creating and managing spatially and movement-modulated sensory cells of the agent.
 """
 
@@ -10,33 +10,32 @@ import numpy as np
 import torch
 from typing import Dict, Any, Union, List, Tuple
 
-from rtgym.dataclass import AgentState, Trajectory
+from rtgym.dataclasses import AgentState, Trajectory
 from rtgym.utils.decode_response import (
     decode_response_euclidean,
     decode_response_kdtree,
     decode_response_torch,
     decode_response_faiss,
-    decode_response_interpolation,
-    create_dataclass_result
+    decode_response_interpolation
 )
-from .spatial_modulated import *
-from .spatial_modulated.sm_base import SMBase
-from .movement_modulated import *
+from .sensory.spatial_modulated import *
+from .sensory.spatial_modulated.sm_base import SMBase
+from .sensory.movement_modulated import *
 
 
-class Sensory:
+class Neurons:
     """
     The class object that manages the sensory system of the agent. More broadly, 
     it handles all simulated neuronal responses of the agent.  
 
     When the gym is initialized, an `Agent` object is automatically created, 
-    which in turn creates a `Sensory` object. The `Sensory` object is initially 
+    which in turn creates a `Neurons` object. The `Neurons` object is initially 
     just a placeholder and must be initialized with a sensory profile (a dictionary) 
     that defines the simulated neuronal groups and their parameters.  
 
     During spatial traversal, RatatouGym separates the concerns of trajectory 
     generation and neuronal response computation. Once a trajectory is generated, 
-    RatatouGym calls the `get_response` method of the `Sensory` object. This 
+    RatatouGym calls the `get_response` method of the `Neurons` object. This 
     method takes the trajectory as input and computes the corresponding neuronal 
     responses using the defined tuning curves.  
 
@@ -48,7 +47,7 @@ class Sensory:
     """
     def __init__(self, gym):
         self.gym = gym
-        self.sensories = {}
+        self.neuron_groups = {}
         self.ranges = None  # Keep track of the indices of the sensory cells
 
     @property
@@ -80,43 +79,48 @@ class Sensory:
         """
         List all the sensory cells.
         """
-        return list(self.sensories.keys())
+        return list(self.neuron_groups)
 
     def init_from_profile(self, sensory_profile):
         # Initialize spatial and movement modulated cells
-        self.sensories = {}
-        self._update_sensories(sensory_profile if sensory_profile is not None else {})
+        self.neuron_groups = {}
+        profile = sensory_profile if sensory_profile is not None else {}
+        self._update_neurons(profile)
         self._update_ranges()
     
-    def add_sensory(self, sensory_profile: Dict[str, Any]):
+    def add_neuron_group(self, sensory_profile: Dict[str, Any]):
         """
         Add a sensory cell to the sensory system.
 
         Args:
             sensory_profile: Dictionary containing the sensory profile.
         """
-        self._update_sensories(sensory_profile if sensory_profile is not None else {})
+        profile = sensory_profile if sensory_profile is not None else {}
+        self._update_neurons(profile)
         self._update_ranges()
 
-    def _update_sensories(self, profile_list):
+    def _update_neurons(self, profile_list):
         """
         Initializes the cells based on the provided profile list.
         """
         for key, value in profile_list.items():
-            sensory_class = Sensory._get_sensory_class(value['type'])
+            sensory_type = value.get('type', 'diffusion_cell')
+            sensory_class = Neurons._get_sensory_class(sensory_type)
             if self.arena.ndim == 3 and sensory_class is not DiffusionCell:
                 raise ValueError('Only diffusion_cell currently supports 3D arenas.')
             params = dict(value)
             if sensory_class is DiffusionCell:
                 params.setdefault('device', self.gym.device)
-            self.sensories[key] = sensory_class(sensory_key=key, **self.common_params, **params)
+            self.neuron_groups[key] = sensory_class(sensory_key=key, **self.common_params, **params)
 
     def _update_ranges(self):
-        _ranges = np.cumsum([_sens.n_cells for _sens in self.sensories.values()])
-        _ranges = np.insert(_ranges, 0, 0).tolist()
-        self.ranges = {key: (_ranges[i], _ranges[i+1]) for i, key in enumerate(self.sensories.keys())}
+        counts = [group.n_cells for group in self.neuron_groups.values()]
+        _ranges = np.cumsum(counts)
+        _ranges = np.insert(_ranges, 0, 0)
+        _ranges = _ranges.tolist()
+        self.ranges = {key: (_ranges[i], _ranges[i+1]) for i, key in enumerate(self.neuron_groups)}
     
-    def filter_sensories(self, keys=None, str_filter=None, type_filter=None):
+    def filter_neurons(self, keys=None, str_filter=None, type_filter=None):
         """
         This helps to find the keys of the sensory cells that match the given criteria.
 
@@ -126,21 +130,21 @@ class Sensory:
         if keys is not None:
             if isinstance(keys, str):
                 return_keys = [keys]
-            elif isinstance(keys, list):
-                return_keys = keys
+            elif hasattr(keys, '__iter__'):
+                return_keys = list(keys)
             else:
                 raise ValueError(f"Unknown keys: {keys}")
         elif str_filter is not None:
-            return_keys = [key for key in self.sensories.keys() if str_filter in key]
+            return_keys = [key for key in self.neuron_groups.keys() if str_filter in key]
         elif type_filter is not None:
-            return_keys = [key for key, sensory_item in self.sensories.items() if type_filter == sensory_item.sens_type]
+            return_keys = [key for key, sensory_item in self.neuron_groups.items() if type_filter == sensory_item.sens_type]
         else:
-            return_keys = list(self.sensories.keys())
+            return_keys = list(self.neuron_groups)
         return sorted(return_keys)
 
-    def num_sensories(self, keys=None, str_filter=None, type_filter=None):
-        keys = self.filter_sensories(keys, str_filter, type_filter)
-        return sum([self.sensories[key].n_cells for key in keys])
+    def num_neurons(self, keys=None, str_filter=None, type_filter=None):
+        keys = self.filter_neurons(keys, str_filter, type_filter)
+        return sum([self.neuron_groups[key].n_cells for key in keys])
 
     @staticmethod
     def _get_sensory_class(sensory_type):
@@ -170,13 +174,18 @@ class Sensory:
             AssertionError: If non-spatial modulated sensory cells are included.
         """
         # Filter and aggregate the sensory response maps.
-        keys = self.filter_sensories(keys, str_filter, type_filter)
+        keys = self.filter_neurons(keys, str_filter, type_filter)
         res_maps = []
         for key in keys:
-            assert self.sensories[key].sens_category == 'spatial_modulated', (
+            assert self.neuron_groups[key].sens_category == 'spatial_modulated', (
                 "Only spatial_modulated sensory cells can be decoded into a trajectory"
             )
-            res_maps.append(self.sensories[key].response_map)
+            response_map = self.neuron_groups[key].response_map
+            if isinstance(response_map, torch.Tensor):
+                response_map = response_map.detach()
+                response_map = response_map.cpu()
+                response_map = response_map.numpy()
+            res_maps.append(response_map)
         
         # Concatenate along the cell dimension. Shape: (n_cells, H, W)
         return np.concatenate(res_maps, axis=0)
@@ -191,7 +200,7 @@ class Sensory:
         ranging from exact brute-force search to fast approximate methods.
 
         Args:
-            response (np.ndarray): Sensory response array of shape:
+            response (np.ndarray): Neurons response array of shape:
                 - (B, T, D) for trajectory decoding
                 - (B, D) for single state decoding
                 where B=batch size, T=time steps, D=feature dimensions
@@ -221,6 +230,18 @@ class Sensory:
             >>> # Fast approximate decoding with FAISS
             >>> trajectory = sensory.decode_response(responses, method="faiss", n_clusters=50)
         """
+        # Existing decoders operate on 2D maps; adapt tensor input explicitly.
+        if self.arena.ndim != 2:
+            raise ValueError('Response decoding currently requires a 2D arena.')
+        if isinstance(response, torch.Tensor):
+            response = response.detach()
+            response = response.cpu()
+            response = response.numpy()
+        if isinstance(res_maps, torch.Tensor):
+            res_maps = res_maps.detach()
+            res_maps = res_maps.cpu()
+            res_maps = res_maps.numpy()
+
         # Get response maps if not provided
         if res_maps is None:
             res_maps = self.aggregate_res_maps(keys, str_filter, type_filter)
@@ -229,34 +250,34 @@ class Sensory:
         if method == "kdtree":
             pred_coords, is_trajectory = decode_response_kdtree(response, res_maps)
         elif method == "torch_euclidean" and use_torch:
-            pred_coords, is_trajectory = decode_response_torch(
-                response, res_maps, device, kwargs.get('chunk_size', 1024)
-            )
+            chunk_size = kwargs.get('chunk_size', 1024)
+            pred_coords, is_trajectory = decode_response_torch(response, res_maps, device, chunk_size)
         elif method == "faiss":
-            pred_coords, is_trajectory = decode_response_faiss(
-                response, res_maps, kwargs.get('n_clusters', 100)
-            )
+            n_clusters = kwargs.get('n_clusters', 100)
+            pred_coords, is_trajectory = decode_response_faiss(response, res_maps, n_clusters)
         elif method == "interpolation":
+            n_anchors = kwargs.get('n_anchors', 1000)
+            random_state = kwargs.get('random_state', 42)
             pred_coords, is_trajectory = decode_response_interpolation(
-                response, res_maps,
-                kwargs.get('n_anchors', 1000),
-                kwargs.get('random_state', 42)
-            )
+                response, res_maps, n_anchors, random_state)
         else:
             # Default to euclidean method
             pred_coords, is_trajectory = decode_response_euclidean(response, res_maps)
 
         # Create and return appropriate dataclass
-        return create_dataclass_result(pred_coords, is_trajectory)
+        coords = torch.as_tensor(pred_coords, device=self.gym.device)
+        if is_trajectory:
+            return Trajectory(coord=coords, device=self.gym.device)
+        return AgentState(coord=coords, device=self.gym.device)
 
     def to(self, device, dtype=None):
         """Prepare spatial fields for repeated tensor queries."""
-        for sensory in self.sensories.values():
+        for sensory in self.neuron_groups.values():
             if isinstance(sensory, SMBase):
                 sensory.to(device, dtype=dtype)
         return self
 
-    def get_response(self, agent_data, return_format='dict', keys=None,
+    def get_response(self, agent_data, return_format='tensor', keys=None,
                      str_filter=None, type_filter=None, device=None):
         """Return selected responses as a dictionary, NumPy array, or tensor.
 
@@ -265,41 +286,42 @@ class Sensory:
         """
         if return_format not in ('dict', 'array', 'tensor'):
             raise ValueError(f'Unknown return format: {return_format}')
-        keys = self.filter_sensories(keys, str_filter, type_filter)
+        keys = self.filter_neurons(keys, str_filter, type_filter)
         responses = {}
         numpy_data = None
         tensor_input = isinstance(agent_data.coord, torch.Tensor)
         query_device = device
-        if query_device is None and return_format == 'tensor':
+        if query_device is None and return_format in ('tensor', 'dict'):
             query_device = self.gym.device
 
         # Compute every selected response once, using each sensory's backend.
         for key in keys:
-            sensory = self.sensories[key]
+            sensory = self.neuron_groups[key]
             if isinstance(sensory, SMBase):
-                output_format = None if return_format == 'dict' else return_format
+                output_format = 'tensor' if return_format == 'dict' else return_format
                 response = sensory.get_response(agent_data, output_format, query_device)
             else:
                 data = agent_data
                 if tensor_input:
                     if numpy_data is None:
-                        numpy_data = agent_data.to_numpy()
+                        numpy_data = agent_data.as_numpy()
                     data = numpy_data
                 response = sensory.get_response(data)
-                if return_format == 'tensor':
-                    response = torch.as_tensor(response, device=query_device)
+                if return_format in ('tensor', 'dict'):
+                    response = torch.as_tensor(response, dtype=torch.float32, device=query_device)
             responses[key] = response
         if return_format == 'dict':
             return responses
         if not responses:
             raise ValueError('No sensory groups match the selection.')
-        values = list(responses.values())
+        values = responses.values()
+        values = list(values)
         if return_format == 'tensor':
             return torch.cat(values, dim=-1)
         return np.concatenate(values, axis=-1)
 
     def compute_res(self):
-        for _sens in self.sensories.values():
+        for _sens in self.neuron_groups.values():
             _sens._compute_res()
 
     def save(self, file_path):
@@ -310,7 +332,7 @@ class Sensory:
             file_path: Path to the file where the sensory cells will be saved.
         """
         all_sensory_data = {}
-        for key, _sens in self.sensories.items():
+        for key, _sens in self.neuron_groups.items():
             all_sensory_data[key] = _sens.state_dict()
         with open(file_path, 'wb') as f:
             pickle.dump(all_sensory_data, f)
@@ -325,12 +347,13 @@ class Sensory:
                 If False, replace the existing sensory cells.
         """
         if not append:
-            self.sensories = {}
+            self.neuron_groups = {}
         for key in state_dict.keys():
             _sens_data = state_dict[key]
-            _sens_class = self._get_sensory_class(_sens_data.pop('sens_type'))
+            sensory_type = _sens_data.pop('sens_type')
+            _sens_class = self._get_sensory_class(sensory_type)
             _sens = _sens_class.load_from_dict(_sens_data, self.arena)
-            self.sensories[key] = _sens
+            self.neuron_groups[key] = _sens
 
     def load(self, file_path):
         """

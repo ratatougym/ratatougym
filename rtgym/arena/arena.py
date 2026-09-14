@@ -25,6 +25,7 @@ class Arena:
     
     def __init__(self, gym, **kwargs):
         self.gym = gym
+        self.device = gym.device
         self._tensor_maps = {}
         self.spatial_resolution = gym.spatial_resolution
         self._arena_map = None
@@ -91,7 +92,7 @@ class Arena:
         self._tensor_maps.clear()
         self._arena_map = arena_map
         self.dimensions = self._arena_map.shape
-        self.free_space = np.argwhere(self._arena_map == 0)
+        self.free_space_numpy = np.argwhere(self._arena_map == 0)
         self.notify_subscribers()  # notify subscribers that the arena has changed
 
     @property
@@ -107,12 +108,16 @@ class Arena:
         key = str(device)
         if key not in self._tensor_maps:
             arena_map = np.ascontiguousarray(self.arena_map)
-            self._tensor_maps[key] = torch.as_tensor(arena_map, device=device)
+            self._tensor_maps[key] = torch.as_tensor(arena_map, dtype=torch.float32, device=device)
         return self._tensor_maps[key]
 
     @property
     def map_(self):
         return self.tensor_map(self.gym.device)
+
+    @map_.setter
+    def map_(self, value):
+        self.arena_map = value
 
     @property
     def invmap_(self):
@@ -193,9 +198,21 @@ class Arena:
         # Generate the arena map
         self.arena_map = shape_generators[shape](self.spatial_resolution, **kwargs)
 
-    def generate_random_pos(self, size):
-        """ Get random positions in the arena """
-        return self.free_space[np.random.choice(self.free_space.shape[0], size=size, replace=True)]
+    @property
+    def free_space(self):
+        return torch.as_tensor(self.free_space_numpy, device=self.device)
+
+    def generate_random_pos(self, batch_size):
+        """Sample free positions as a tensor on the arena device."""
+        n_free = len(self.free_space_numpy)
+        indices = torch.randint(n_free, (batch_size,), device=self.device)
+        return self.free_space[indices]
+
+    def generate_random_pos_numpy(self, size):
+        """Sample with the original NumPy RNG for the random_walk control."""
+        count = len(self.free_space_numpy)
+        indices = np.random.choice(count, size=size, replace=True)
+        return self.free_space_numpy[indices]
 
     def validate_index(self, pos):
         """ Check if the position is in the arena """

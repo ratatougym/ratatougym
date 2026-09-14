@@ -94,7 +94,7 @@ class PlaceCell(SMBase):
         super()._init_response_map()
 
         arena_dims = self.arena.dimensions
-        arena_free_space = self.arena.free_space
+        arena_free_space = self.arena.free_space_numpy
         # Randomly select cell centers from available free space
         place_centers = arena_free_space[self.rng.choice(arena_free_space.shape[0], size=self.n_cells, replace=False)]
         cells = np.zeros((self.n_cells, *arena_dims))

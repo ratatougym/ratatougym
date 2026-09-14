@@ -9,6 +9,7 @@ import os
 import numpy as np
 from rtgym.agent import Agent
 from rtgym.arena import Arena
+from rtgym.dataclasses import Trajectory
 import torch
 import matplotlib.pyplot as plt
 from IPython.display import HTML
@@ -391,6 +392,8 @@ class RatatouGym():
             ...                    stride=5, interval=100, max_frames=50)
             >>> anim.save('trajectory.gif', writer='pillow', fps=10)
         """
+        if isinstance(traj, Trajectory):
+            traj = traj.as_numpy()
         if traj.int_coord.shape[1] == 0 or traj.hd.shape[1] == 0:
             raise ValueError("traj.int_coord or traj.hd has no data along the expected axis.")
 
@@ -482,6 +485,8 @@ class RatatouGym():
                 - If return_format is 'html': Returns HTML object for Jupyter display
         """
 
+        if isinstance(traj, Trajectory):
+            traj = traj.as_numpy()
         plot_w, plot_h = self._compute_plot_dimensions(self.arena.arena_map, height)
         if return_format == 'anim' or return_format == 'html':
             return self.vis_gif(traj, plot_w, plot_h, return_format, **vis_kwargs)

@@ -1,30 +1,36 @@
 """EMA navigation adapted from grasp-lyrl/grid_and_place's rtgym.
 
 The motion equations and random draw order match its eager implementation.
-Small sequential updates run on CPU by default; no implicit compilation occurs.
+The control device is configurable; no implicit compilation occurs.
 """
 
 import numpy as np
 import torch
 import torch.nn.functional as F
 from scipy.ndimage import distance_transform_edt
-from rtgym.dataclass import TensorAgentState, TensorTrajectory
+from rtgym.dataclasses import AgentState, Trajectory
 
 
-class EMABehavior:
+class TrajectoryGenerator:
     """Smoothed speed/direction targets with tangential boundary avoidance.
 
     ``spd_mean`` and ``spd_sd`` are in grid cells/second, as in grid_and_place.
-    Use ``generate_steps`` for an explicit number of samples.
+    Use ``generate_trajectory`` for an explicit number of samples.
     """
 
-    def __init__(self, gym, profile):
+    def __init__(self, gym, bhv_device=None):
         self.gym = gym
-        device = profile.get('device', 'cpu')
+        device = gym.device if bhv_device is None else bhv_device
         self.device = torch.device(device)
-        self.cur_state = None
+        self.bhv_device = self.device
+        self.cur_state = AgentState(device=self.device)
+        self.initialized = False
+
+    def init_from_profile(self, profile):
         self._set_config(profile)
         self._recompute_maps()
+        self.reset()
+        self.initialized = True
 
     def _set_config(self, profile):
         # Retain upstream defaults and the conversion used by boundary avoidance.
@@ -56,7 +62,10 @@ class EMABehavior:
             distance = 12.0 * typical_speed * (0.5 + 0.5 * avoidance)
             self.avoid_boundary_dist = max(distance, 1e-6)
 
-    def generate_steps(self, n_steps, batch_size, init_state=None, init_pos=None):
+    def generate_trajectory(self, duration_ts, batch_size, init_state=None, init_pos=None):
+        if not self.initialized:
+            raise ValueError('Initialize the control profile before generating trajectories.')
+        n_steps = duration_ts
         if not isinstance(n_steps, int) or n_steps < 1:
             raise ValueError('n_steps must be a positive integer.')
         if not isinstance(batch_size, int) or batch_size < 1:
@@ -89,7 +98,7 @@ class EMABehavior:
             head_dir[:, ts] = state.head_dir
 
         self.cur_state = state
-        traj = TensorTrajectory(coord, spd, mv_dir, head_dir, device=self.device)
+        traj = Trajectory(coord=coord, spd=spd, mv_dir=mv_dir, head_dir=head_dir, device=self.device)
         return traj, state
 
     def _precompute_targets(self, batch_size, n_steps):
@@ -171,16 +180,16 @@ class EMABehavior:
     def _init_state(self, batch_size, init_state, init_pos):
         # Continue a full EMA state; positions alone create fresh motion targets.
         if init_state is None:
-            state = TensorAgentState(device=self.device)
+            state = AgentState(device=self.device)
             if init_pos is not None:
                 state.coord = torch.as_tensor(init_pos, device=self.device)
         else:
-            if not isinstance(init_state, TensorAgentState):
-                raise TypeError('EMA continuation requires a TensorAgentState.')
-            state = init_state.to(self.device)
-            state = state.clone()
+            if not isinstance(init_state, AgentState):
+                raise TypeError('EMA continuation requires a AgentState.')
+            state = init_state.clone()
+            state.to(self.device)
         if state.coord is None:
-            free_space = self.gym.arena.free_space
+            free_space = self.gym.arena.free_space_numpy
             n_free = len(free_space)
             indices = torch.randint(n_free, (batch_size,), device=self.device)
             free_space = torch.as_tensor(free_space, device=self.device)
@@ -274,3 +283,27 @@ class EMABehavior:
         normal_map = normal_map / norms
         self.distance_map = torch.as_tensor(distance_map, device=self.device)
         self.normal_map = torch.as_tensor(normal_map, device=self.device)
+
+    def reset(self):
+        self.cur_state = AgentState(device=self.device)
+
+    def step(self, state, mv_dir, spd, head_dir):
+        """Apply commanded grid-cell displacement with the same wall rejection."""
+        if state is None or state.coord is None:
+            raise ValueError('Spawn an agent before stepping.')
+        state = state.clone()
+        state.to(self.device)
+        state.mv_dir = torch.as_tensor(mv_dir, device=self.device)
+        state.spd = torch.as_tensor(spd, device=self.device)
+        state.head_dir = torch.as_tensor(head_dir, device=self.device)
+        expected = state.coord.shape
+        if state.mv_dir.shape != expected or state.head_dir.shape != expected:
+            raise ValueError('Direction vectors must match the coordinate shape.')
+        if state.spd.shape != (expected[0], 1):
+            raise ValueError('spd must have shape (batch, 1).')
+        proposed = state.coord + state.disp
+        indices = proposed.long()
+        valid = self.gym.arena.validate_index(indices)
+        proposed[~valid] = state.coord[~valid]
+        state.coord = proposed
+        return state

@@ -1,1 +1,1 @@
-from .sensory import Sensory
+"""Spatial and movement-modulated neuron implementations."""

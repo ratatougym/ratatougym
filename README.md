@@ -38,6 +38,73 @@ RatatouGym automatically installs these core dependencies via pip:
 
 **Note:** For GPU acceleration, you may install `faiss-gpu` instead of `faiss-cpu`.
 
+## Public API
+
+The public interface follows `grid_and_place/rtgym`. Initialize control with
+`init_control`, configure named neuron groups with `init_neurons`, and generate
+trajectories measured in **timesteps**. Responses and trajectory data are Torch
+tensors by default.
+
+```python
+import torch
+from rtgym import RatatouGym
+from rtgym.dataclasses import AgentState, Trajectory
+
+gym = RatatouGym(temporal_resolution=50, spatial_resolution=1, device='cpu')
+gym.init_arena_map(shape='rectangle', dimensions=[100, 100])
+
+control = dict(control_type='trajectory_generator', spd_mean=40, spd_sd=20,
+               alpha_spd=0.8, alpha_dir=0.2, switch_dir_prob=0.1,
+               switch_spd_prob=0.2, boundary_avoidance=5)
+gym.agent.init_control(control)
+
+# Profiles without a type use the wall-aware diffusion model from grid_and_place.
+neurons = {'smc0': dict(n_cells=32, sigma=6, seed=42, normalize=True, magnitude=1)}
+gym.agent.init_neurons(neurons)
+
+torch.manual_seed(42)
+traj = gym.agent.random_traverse(duration_ts=200, batch_size=16)
+response = gym.agent.get_response(traj)
+first_batch = traj[0]
+first_state = traj[:, 0]
+```
+
+`traj.coord`, `traj.spd`, `traj.mv_dir`, and `traj.head_dir` use
+`[batch, time, features]`. A single index selects batches. A `(batch, time)` index
+selects both axes; a selection containing one timestep returns `AgentState`, as
+in `grid_and_place`. `AgentState.to(device)` moves the state in place and
+`AgentState.to_numpy()` returns `(coord, head_dir, disp)` arrays.
+
+- `agent.control` owns the motion generator and its current state.
+- `agent.neurons.neuron_groups` (also `agent.neuron_groups`) holds named neurons;
+  use `agent.num_neurons()` to count them.
+- `arena.map_`, `arena.invmap_`, `arena.free_space`, and
+  `arena.generate_random_pos(batch_size)` expose tensors. `arena.map_` also accepts
+  assignment and rebuilds dependent state.
+- Motion defaults to the gym device. To use CPU motion with GPU sensory fields,
+  set `gym.device` through the constructor and set `device='cpu'` in the control
+  profile. Returned trajectories still use the gym device.
+- `agent.random_traverse(200, batch_size)` means 200 samples, not 200 seconds.
+  Use `gym.to_ts(seconds)` explicitly when starting from a duration in seconds.
+- `get_response` returns a tensor; `return_format='dict'` returns named tensors,
+  and `return_format='array'` explicitly requests NumPy.
+
+Existing Gaussian, place, grid, boundary, and movement-modulated cell types can
+be selected with the neuron's `type` field, for example `type='weak_sm_cell'`.
+The original NumPy random walk is available through
+`control_type='random_walk'`, using its original movement profile parameters;
+its numerical simulation is retained and its public trajectory is converted to
+float32 tensors. Three-dimensional arenas support `trajectory_generator` and
+`diffusion_cell`; the other cell models remain 2D. Arena layouts include the
+original shapes plus `hairpin`, `carpenter_rooms`, and `box`.
+
+The old `set_behavior`, `set_sensory`, `random_traverse_steps`, and
+`TensorTrajectory`/`TensorAgentState` entry points have been replaced by the
+standard names above. NumPy data containers remain under `rtgym.dataclass` for
+internal legacy utilities; the public tensor classes live in `rtgym.dataclasses`.
+Use `.as_numpy()` for 2D conversion when working directly with NumPy utilities.
+The external documentation linked above describes the earlier API.
+
 ## Structure
 - [Gym](#RatatouGym): `RatatouGym` class. The gym environment for spatial navigation tasks, it must contain an `Arena` and an `Agent`.
     - [Arena](#arena): The arena where the agent is placed in. It sets the shape of the arena. It can potentially add walls and obstacles. All the agent sensory and behavior is based on the shape of the arena (and the obstacles in it).
@@ -58,7 +125,7 @@ The `Arena` class and its children classes. Define the shape of the arena. \[[Do
 `Agent` class. The agent that is placed in the arena. It has a set of sensory and behavior.
 
 ### Sensory
-The `Sensory` class and its children classes. Define the sensories of the agent. It includes the spatial modulated sensories and movement modulated sensories \[[Documentation](https://ratatougym.github.io/rtgym.sensory.html)\]
+The `Neurons` manager and its cell classes. Define the sensories of the agent. It includes the spatial modulated sensories and movement modulated sensories \[[Documentation](https://ratatougym.github.io/rtgym.sensory.html)\]
 
 ### Behavior
 Sometimes we need the agent to follow a behavior. The `Behavior` class and its children classes define the behaviors of the agent. <br>

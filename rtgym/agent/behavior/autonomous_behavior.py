@@ -201,7 +201,7 @@ class AutonomousBehavior(BaseBehavior):
             if init_pos is not None:
                 raw_agent_state.coord = init_pos
             else:
-                raw_agent_state.coord = self.arena.generate_random_pos(self.batch_size)
+                raw_agent_state.coord = self.arena.generate_random_pos_numpy(self.batch_size)
             raw_agent_state.vel_norm = self._random_velocity(self.batch_size)
             raw_agent_state.drift = self._rad_vel_to_disp(
                 direction=self._random_rad(self.batch_size), 
