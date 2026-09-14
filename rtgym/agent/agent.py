@@ -1,8 +1,10 @@
 import numpy as np
+import torch
 from rtgym.agent.behavior import Behavior
 from rtgym.agent.sensory import Sensory
 from rtgym.dataclass import AgentState, Trajectory, RawAgentState, RawTrajectory
 from typing import Union
+from rtgym.dataclass import TensorAgentState
 
 
 class Agent():
@@ -114,6 +116,8 @@ class Agent():
         Updates behavior and sensory systems when the arena changes.
         """
         if self.arena is not None:
+            if isinstance(self._state, TensorAgentState):
+                self._state = RawAgentState()
             self.behavior._on_arena_change()
             self.sensory._on_arena_change()
             self._init_behavior_from_profile()
@@ -125,6 +129,8 @@ class Agent():
         Args:
             behavior_profile (dict): Behavior configuration parameters.
         """
+        if self.behavior.ema is not None or behavior_profile.get('type') == 'ema':
+            self._state = RawAgentState()
         self.behavior_profile = behavior_profile
         self._init_behavior_from_profile()
 
@@ -185,6 +191,9 @@ class Agent():
     # Behavior
     # ================================
     def random_traverse(self, duration: float, batch_size: int, init_pos=None, init_state=None, pause_prob=0):
+        if self.behavior.ema is not None:
+            n_steps = self.gym.to_ts(duration)
+            return self.random_traverse_steps(n_steps, batch_size, init_pos, init_state, pause_prob)
         traj, state = self.behavior.generate_trajectory(duration, batch_size, init_pos, init_state)
         if pause_prob > 0:
             pause_mask = np.random.rand(batch_size) < pause_prob
@@ -195,8 +204,33 @@ class Agent():
         self._state = state
         return traj
 
-    def step(self, displacement):
-        self._state = self.controllable.step(self._state, displacement)
+    def random_traverse_steps(self, n_steps, batch_size, init_pos=None,
+                              init_state=None, pause_prob=0):
+        """Generate EMA samples, explicitly counting timesteps rather than seconds.
+
+        Consecutive calls continue the EMA state. Returned tensors use gym.device;
+        the generator keeps its own configured device (CPU by default).
+        """
+        if self.behavior.ema is None:
+            raise ValueError('Set behavior type=ema before requesting tensor trajectories.')
+        if not 0 <= pause_prob <= 1:
+            raise ValueError('pause_prob must be in [0, 1].')
+        if init_state is None and init_pos is None:
+            if isinstance(self._state, TensorAgentState):
+                init_state = self._state
+        traj, state = self.behavior.ema.generate_steps(n_steps, batch_size, init_state, init_pos)
+
+        # Keep paused trajectories and continuation state at the same position.
+        if pause_prob > 0:
+            draws = torch.rand(batch_size, device=traj.device)
+            paused = draws < pause_prob
+            start_pos = traj.coord[paused, 0]
+            traj.coord[paused] = start_pos[:, None]
+            traj.spd[paused] = 0
+            state.coord[paused] = start_pos
+            state.spd[paused] = 0
+        self._state = state
+        return traj.to(self.gym.device)
 
     def get_response(
             self,
@@ -204,13 +238,14 @@ class Agent():
             return_format='array', 
             keys=None, 
             str_filter=None, 
-            type_filter=None
+            type_filter=None,
+            device=None
         ):
         if isinstance(agent_data, RawAgentState):
             agent_data = agent_data.to_agent_state()
         elif isinstance(agent_data, RawTrajectory):
             agent_data = agent_data.to_trajectory()
-        return self.sensory.get_response(agent_data, return_format, keys, str_filter, type_filter)
+        return self.sensory.get_response(agent_data, return_format, keys, str_filter, type_filter, device)
 
     def spawn(self, init_pos=None, init_state=None):
         """Spawn the controllable agent at the given position and state.
@@ -223,6 +258,15 @@ class Agent():
             init_state (AgentState or RawAgentState, optional): Initial state of the agent. 
                 If both init_pos and init_state are provided, init_state will be used.
         """
+        if self.behavior.ema is not None:
+            if init_state is not None:
+                if not isinstance(init_state, TensorAgentState):
+                    raise TypeError('EMA spawn requires a TensorAgentState.')
+                self._state = init_state.clone()
+            else:
+                device = self.behavior.ema.device
+                self._state = TensorAgentState(coord=init_pos, device=device)
+            return
         self.controllable.reset()
         if init_state is not None:
             if isinstance(init_state, RawAgentState):
@@ -239,7 +283,10 @@ class Agent():
         """
         Spawn the controller at a random position in the arena.
         """
-        self.spawn(init_pos=self.arena.random_position(batch_size))
+        init_pos = self.arena.generate_random_pos(batch_size)
+        self.spawn(init_pos=init_pos)
 
     def step(self, displacement):
+        if self.behavior.ema is not None:
+            raise ValueError('Manual displacement control uses the original 2D behavior.')
         self._state = self.controllable.step(self._state, displacement)

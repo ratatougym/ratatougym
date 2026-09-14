@@ -41,8 +41,10 @@ class RatatouGym():
             self,
             temporal_resolution,
             spatial_resolution,
+            device='cpu',
             **kwargs
         ):
+        self.device = torch.device(device)
         self.temporal_resolution = temporal_resolution
         self.spatial_resolution = spatial_resolution
         self.arena = Arena(self)

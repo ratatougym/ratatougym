@@ -20,6 +20,7 @@ from rtgym.utils.decode_response import (
     create_dataclass_result
 )
 from .spatial_modulated import *
+from .spatial_modulated.sm_base import SMBase
 from .movement_modulated import *
 
 
@@ -103,12 +104,13 @@ class Sensory:
         """
         for key, value in profile_list.items():
             sensory_class = Sensory._get_sensory_class(value['type'])
-            self.sensories[key] = sensory_class(
-                sensory_key=key, 
-                **self.common_params, 
-                **value
-            )
-    
+            if self.arena.ndim == 3 and sensory_class is not DiffusionCell:
+                raise ValueError('Only diffusion_cell currently supports 3D arenas.')
+            params = dict(value)
+            if sensory_class is DiffusionCell:
+                params.setdefault('device', self.gym.device)
+            self.sensories[key] = sensory_class(sensory_key=key, **self.common_params, **params)
+
     def _update_ranges(self):
         _ranges = np.cumsum([_sens.n_cells for _sens in self.sensories.values()])
         _ranges = np.insert(_ranges, 0, 0).tolist()
@@ -143,7 +145,7 @@ class Sensory:
     @staticmethod
     def _get_sensory_class(sensory_type):
         sensory_classes = {cls.sens_type: cls for cls in 
-                           [WeakSMCell, PlaceCell, BoundaryCell, GridCell,
+                           [WeakSMCell, PlaceCell, BoundaryCell, GridCell, DiffusionCell,
                             SpeedCell, DirectionCell, DirectionRad, DisplacementAbs, 
                             HeadDirectionCell]}
 
@@ -247,39 +249,54 @@ class Sensory:
         # Create and return appropriate dataclass
         return create_dataclass_result(pred_coords, is_trajectory)
 
-    def get_response(
-            self, 
-            agent_data: Union[AgentState, Trajectory],
-            return_format='dict', 
-            keys=None, 
-            str_filter=None, 
-            type_filter=None
-        ):
-        """
-        Get sensory responses for the given trajectory.
+    def to(self, device, dtype=None):
+        """Prepare spatial fields for repeated tensor queries."""
+        for sensory in self.sensories.values():
+            if isinstance(sensory, SMBase):
+                sensory.to(device, dtype=dtype)
+        return self
 
-        Args:
-            traj: rtgym.dataclass.Trajectory object.
-            return_format: Format of the returned responses. Can be 'dict' or 'array'.
-            keys: List of sensory keys to get responses. If None, get responses for all.
-            str_filter: Filter the sensory keys by the given string.
-            type_filter: Filter the sensory keys by the given type.
+    def get_response(self, agent_data, return_format='dict', keys=None,
+                     str_filter=None, type_filter=None, device=None):
+        """Return selected responses as a dictionary, NumPy array, or tensor.
 
-        Returns:
-            responses: Sensory responses. The responses are of shape (n_cells, *arena_dimensions).
-                After indexing, it will be of shape (n_cells, n_batch).
-                When return_format is 'dict', it will be a dictionary of responses.
-                When return_format is 'array', it will be a numpy array of responses.
+        Movement-modulated cells retain their NumPy equations; tensor requests
+        convert those small outputs. Spatial cells query cached fields directly.
         """
-        # Set filter_keys if not provided
+        if return_format not in ('dict', 'array', 'tensor'):
+            raise ValueError(f'Unknown return format: {return_format}')
         keys = self.filter_sensories(keys, str_filter, type_filter)
+        responses = {}
+        numpy_data = None
+        tensor_input = isinstance(agent_data.coord, torch.Tensor)
+        query_device = device
+        if query_device is None and return_format == 'tensor':
+            query_device = self.gym.device
+
+        # Compute every selected response once, using each sensory's backend.
+        for key in keys:
+            sensory = self.sensories[key]
+            if isinstance(sensory, SMBase):
+                output_format = None if return_format == 'dict' else return_format
+                response = sensory.get_response(agent_data, output_format, query_device)
+            else:
+                data = agent_data
+                if tensor_input:
+                    if numpy_data is None:
+                        numpy_data = agent_data.to_numpy()
+                    data = numpy_data
+                response = sensory.get_response(data)
+                if return_format == 'tensor':
+                    response = torch.as_tensor(response, device=query_device)
+            responses[key] = response
         if return_format == 'dict':
-            return {key: self.sensories[key].get_response(agent_data) for key in keys}
-        elif return_format == 'array':
-            res_list = [self.sensories[key].get_response(agent_data) for key in keys]
-            return np.concatenate(res_list, axis=-1)
-        else:
-            raise ValueError(f"Unknown return format: {return_format}")
+            return responses
+        if not responses:
+            raise ValueError('No sensory groups match the selection.')
+        values = list(responses.values())
+        if return_format == 'tensor':
+            return torch.cat(values, dim=-1)
+        return np.concatenate(values, axis=-1)
 
     def compute_res(self):
         for _sens in self.sensories.values():

@@ -1,4 +1,5 @@
 import numpy as np
+import torch
 import matplotlib.pyplot as plt
 from rtgym.utils import print_dict
 
@@ -23,6 +24,8 @@ class Arena:
     """
     
     def __init__(self, gym, **kwargs):
+        self.gym = gym
+        self._tensor_maps = {}
         self.spatial_resolution = gym.spatial_resolution
         self._arena_map = None
         self.subscribers = []
@@ -79,10 +82,41 @@ class Arena:
         Args:
             arena_map (np.ndarray): New arena map.
         """
+        if isinstance(arena_map, torch.Tensor):
+            arena_map = arena_map.detach()
+            arena_map = arena_map.cpu()
+            arena_map = arena_map.numpy()
+        if arena_map.ndim not in (2, 3):
+            raise ValueError('Arena maps must have two or three dimensions.')
+        self._tensor_maps.clear()
         self._arena_map = arena_map
         self.dimensions = self._arena_map.shape
         self.free_space = np.argwhere(self._arena_map == 0)
         self.notify_subscribers()  # notify subscribers that the arena has changed
+
+    @property
+    def ndim(self):
+        return len(self.dimensions)
+
+    def tensor_map(self, device='cpu'):
+        """Cache a tensor view until the map is replaced through its setter."""
+        device = torch.device(device)
+        if device.type == 'cuda' and device.index is None:
+            index = torch.cuda.current_device()
+            device = torch.device('cuda', index)
+        key = str(device)
+        if key not in self._tensor_maps:
+            arena_map = np.ascontiguousarray(self.arena_map)
+            self._tensor_maps[key] = torch.as_tensor(arena_map, device=device)
+        return self._tensor_maps[key]
+
+    @property
+    def map_(self):
+        return self.tensor_map(self.gym.device)
+
+    @property
+    def invmap_(self):
+        return 1 - self.map_
 
     def subscribe(self, subscriber):
         """Subscribe to arena change notifications.
@@ -112,17 +146,22 @@ class Arena:
         Raises:
             AssertionError: If arena_map is not a numpy array.
         """
-        assert isinstance(arena_map, np.ndarray), "arena map must be a numpy array"
+        if isinstance(arena_map, torch.Tensor):
+            arena_map = arena_map.detach()
+            arena_map = arena_map.cpu()
+            arena_map = arena_map.numpy()
+        if not isinstance(arena_map, np.ndarray) or arena_map.ndim not in (2, 3):
+            raise ValueError('arena_map must be a 2D or 3D array.')
 
-        # Check if its edges are all 1. If not, pad them with 1
-        if np.all(arena_map[0, :] == 0):
-            arena_map = np.pad(arena_map, ((1, 0), (0, 0)), mode='constant', constant_values=1)
-        if np.all(arena_map[-1, :] == 0):
-            arena_map = np.pad(arena_map, ((0, 1), (0, 0)), mode='constant', constant_values=1)
-        if np.all(arena_map[:, 0] == 0):
-            arena_map = np.pad(arena_map, ((0, 0), (1, 0)), mode='constant', constant_values=1)
-        if np.all(arena_map[:, -1] == 0):
-            arena_map = np.pad(arena_map, ((0, 0), (0, 1)), mode='constant', constant_values=1)
+        # Preserve official padding: add a wall only when a whole face is free.
+        for axis in range(arena_map.ndim):
+            for side in (0, -1):
+                face = np.take(arena_map, side, axis=axis)
+                free_face = np.all(face == 0)
+                if free_face:
+                    padding = [(0, 0)] * arena_map.ndim
+                    padding[axis] = (1, 0) if side == 0 else (0, 1)
+                    arena_map = np.pad(arena_map, padding, mode='constant', constant_values=1)
 
         self.arena_map = arena_map
 
@@ -142,7 +181,10 @@ class Arena:
             'maze_0': generate_maze_0_arena,
             'maze_1': generate_maze_1_arena,
             'maze_2': generate_maze_2_arena,
-            'trainer_0': generate_trainer_0_arena
+            'trainer_0': generate_trainer_0_arena,
+            'box': generate_box_arena,
+            'hairpin': generate_hairpin_arena,
+            'carpenter_rooms': generate_carpenter_rooms_arena
         }
 
         if shape not in shape_generators:
@@ -157,10 +199,12 @@ class Arena:
 
     def validate_index(self, pos):
         """ Check if the position is in the arena """
+        if isinstance(pos, torch.Tensor):
+            return self._validate_tensor_index(pos)
         if len(pos.shape) == 1:
             pos = pos[np.newaxis, :]
         # check dimension
-        assert pos.shape[1] == 2, "pos must be a 2D array"
+        assert pos.shape[1] == self.ndim, "pos must match the arena dimension"
         # check if the indices are defined
         is_negative = np.all(pos >= 0, axis=1)
         is_exceed = np.all(pos < self.dimensions, axis=1)
@@ -169,8 +213,24 @@ class Arena:
         is_wall[valid_idx] = self.arena_map[tuple(pos[valid_idx].T)] == 1
         return np.logical_not(is_wall)
 
+    def _validate_tensor_index(self, pos):
+        pos = pos.reshape(-1, self.ndim)
+        in_bounds = torch.ones(pos.shape[0], dtype=torch.bool, device=pos.device)
+        indices = []
+        for axis, size in enumerate(self.dimensions):
+            index = pos[:, axis]
+            in_bounds = in_bounds & (index >= 0) & (index < size)
+            index = index.clamp(0, size - 1)
+            indices.append(index)
+        indices = tuple(indices)
+        arena_map = self.tensor_map(pos.device)
+        free = arena_map[indices] == 0
+        return in_bounds & free
+
     def vis(self):
         """ Visualize arena """
+        if self.ndim != 2:
+            raise ValueError('Arena.vis requires a 2D map; plot a slice for 3D.')
         fig, ax = plt.subplots()
         ax.imshow(self.inv_arena_map, vmin=-1, vmax=1, cmap='gray')
         # ax.axis('off')

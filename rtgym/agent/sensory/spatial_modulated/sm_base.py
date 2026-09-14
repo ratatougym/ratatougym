@@ -1,4 +1,5 @@
 import numpy as np
+import torch
 import pickle
 from numpy.random import default_rng
 from typing import Union
@@ -40,6 +41,7 @@ class SMBase():
         self.arena = arena
         self.n_cells = n_cells
         self.sensory_key = sensory_key
+        self._tensor_response_map = None
 
         # Initialize random number generator
         if seed is not None:
@@ -79,26 +81,71 @@ class SMBase():
         """
         utils.print_dict(self.get_specs())
 
-    def get_response(self, agent_data: Union[AgentState, Trajectory]):
-        """Get sensory responses for given agent data.
-        
-        Args:
-            agent_data (AgentState or Trajectory): Agent data containing coordinates.
-            
-        Returns:
-            np.ndarray: Sensory responses with shape:
-                - For Trajectory: (n_batch, n_timesteps, n_cells)
-                - For AgentState: (n_batch, n_cells)
-                
-        Raises:
-            ValueError: If agent_data type is not supported.
+    def to(self, device, dtype=None):
+        """Cache a tensor response field. Call again after editing response_map."""
+        if dtype is None:
+            if isinstance(self.response_map, torch.Tensor):
+                dtype = self.response_map.dtype
+            else:
+                dtype = torch.float32
+        response_map = self.response_map
+        if isinstance(response_map, np.ndarray):
+            response_map = np.ascontiguousarray(response_map)
+        self._tensor_response_map = torch.as_tensor(response_map, dtype=dtype, device=device)
+        return self
+
+    def get_response(self, agent_data, return_format=None, device=None):
+        """Look up states or trajectories on CPU or from a cached tensor field.
+
+        NumPy input keeps the original NumPy result unless tensor output is
+        requested explicitly. Tensor input uses its own device by default.
         """
-        if isinstance(agent_data, Trajectory):
-            return self.response_map[:, agent_data.int_coord[..., 0], agent_data.int_coord[..., 1]].transpose(1, 2, 0)
-        elif isinstance(agent_data, AgentState):
-            return self.response_map[:, agent_data.int_coord[:, 0], agent_data.int_coord[:, 1]].transpose(1, 0)
-        else:
-            raise ValueError(f"Invalid agent_data type: {type(agent_data)}, must be rtgym.dataclass.Trajectory or rtgym.dataclass.AgentState")
+        if not isinstance(agent_data, (AgentState, Trajectory)):
+            raise TypeError('agent_data must be an AgentState or Trajectory.')
+        coord = agent_data.int_coord
+        tensor_input = isinstance(coord, torch.Tensor)
+        if return_format is None:
+            return_format = 'tensor' if tensor_input else 'array'
+        if return_format not in ('array', 'tensor'):
+            raise ValueError('return_format must be array or tensor.')
+
+        # Keep the legacy NumPy lookup and dtype unchanged.
+        numpy_field = isinstance(self.response_map, np.ndarray)
+        if return_format == 'array' and numpy_field:
+            if tensor_input:
+                coord = coord.detach()
+                coord = coord.cpu()
+                coord = coord.numpy()
+            indices = tuple(coord[..., axis] for axis in range(self.arena.ndim))
+            response = self.response_map[(slice(None), *indices)]
+            return np.moveaxis(response, 0, -1)
+
+        # Move coordinates, not the whole field, for repeated device queries.
+        if device is None:
+            if tensor_input:
+                device = coord.device
+            elif self._tensor_response_map is not None:
+                device = self._tensor_response_map.device
+            elif isinstance(self.response_map, torch.Tensor):
+                device = self.response_map.device
+            else:
+                device = 'cpu'
+        device = torch.device(device)
+        if device.type == 'cuda' and device.index is None:
+            index = torch.cuda.current_device()
+            device = torch.device('cuda', index)
+        cached = self._tensor_response_map
+        if cached is None or cached.device != device:
+            self.to(device)
+        coord = torch.as_tensor(coord, device=device, dtype=torch.long)
+        indices = tuple(coord[..., axis] for axis in range(self.arena.ndim))
+        response = self._tensor_response_map[(slice(None), *indices)]
+        response = torch.movedim(response, 0, -1)
+        if return_format == 'array':
+            response = response.detach()
+            response = response.cpu()
+            return response.numpy()
+        return response
 
     def vis(self, N=10, cmap='jet', *args, **kwargs):
         """Visualize the spatially modulated cells.

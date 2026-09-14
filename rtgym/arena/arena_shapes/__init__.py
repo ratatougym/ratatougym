@@ -7,3 +7,7 @@ from .maze_0 import *
 from .maze_1 import *
 from .maze_2 import *
 from .trainer_0 import *
+
+from .box import generate_box_arena
+from .hairpin import generate_hairpin_arena, hairpin_waypoints
+from .carpenter_rooms import generate_carpenter_rooms_arena
